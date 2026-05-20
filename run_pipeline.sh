@@ -101,8 +101,7 @@ RUN_BT="${RUN_BT:-j}"
 
 CAPITAL=50
 RISK=1.0
-BT_START_DATE_ARG=""
-BT_END_DATE_ARG=""
+USE_SPLIT="j"
 if [[ "$RUN_BT" == "j" || "$RUN_BT" == "J" || "$RUN_BT" == "y" || "$RUN_BT" == "Y" ]]; then
     read -p "Startkapital in USDT [Standard: 50]: " CAP_INPUT
     CAP_INPUT="${CAP_INPUT//[$'\r\n ']/}"
@@ -114,8 +113,8 @@ if [[ "$RUN_BT" == "j" || "$RUN_BT" == "J" || "$RUN_BT" == "y" || "$RUN_BT" == "
 
     echo ""
     echo -e "${YELLOW}--- Train/Test Split ---${NC}"
-    echo "  70/30: Discovery auf 70% der Daten, Backtest auf letzten 30%"
-    echo "  Nein:  Backtest auf denselben Daten (In-Sample, optimistischer)"
+    echo "  70/30: Discovery auf 70% der Daten, Backtest zeigt Train + Test im Vergleich"
+    echo "  Nein:  Discovery auf vollem Datensatz (In-Sample, optimistischer)"
     echo ""
     read -p "70/30 Out-of-Sample Split verwenden? (j/n) [Standard: j]: " USE_SPLIT
     USE_SPLIT="${USE_SPLIT//[$'\r\n ']/}"
@@ -128,12 +127,9 @@ if [[ "$RUN_BT" == "j" || "$RUN_BT" == "J" || "$RUN_BT" == "y" || "$RUN_BT" == "
         fi
         TRAIN_DAYS=$(( TOTAL_DAYS * 70 / 100 ))
         TEST_DAYS=$(( TOTAL_DAYS - TRAIN_DAYS ))
-        SPLIT_DATE=$(date -d "$TEST_DAYS days ago" +%F)
-        TODAY=$(date +%F)
-        BT_START_DATE_ARG="--start-date $SPLIT_DATE"
-        BT_END_DATE_ARG="--end-date $TODAY"
-        echo -e "${CYAN}ℹ  Training:  letzte ${TRAIN_DAYS} Tage (bis $SPLIT_DATE)${NC}"
-        echo -e "${CYAN}ℹ  Backtest:  letzte ${TEST_DAYS} Tage ($SPLIT_DATE → $TODAY)${NC}"
+        echo -e "${CYAN}ℹ  Discovery: letzte ${TRAIN_DAYS} Tage (70% des Rückblicks)${NC}"
+        echo -e "${CYAN}ℹ  Backtest:  70/30-Split — zeigt Train + Test im Vergleich${NC}"
+        # Discovery auf Trainingsdaten begrenzen
         HISTORY_ARG="--history-days $TRAIN_DAYS"
     fi
 fi
@@ -215,13 +211,11 @@ if [[ "$RUN_BT" == "j" || "$RUN_BT" == "J" || "$RUN_BT" == "y" || "$RUN_BT" == "
             echo -e "${CYAN}  Backtest: $sym ($tf)${NC}"
             $PYTHON "$SCRIPT_DIR/run_backtest.py" \
                 --symbol "$sym" --timeframe "$tf" \
-                --capital "$CAPITAL" --risk "$RISK" \
-                $BT_START_DATE_ARG $BT_END_DATE_ARG
+                --capital "$CAPITAL" --risk "$RISK"
         done
     else
         $PYTHON "$SCRIPT_DIR/run_backtest.py" \
-            --capital "$CAPITAL" --risk "$RISK" \
-            $BT_START_DATE_ARG $BT_END_DATE_ARG
+            --capital "$CAPITAL" --risk "$RISK"
     fi
     echo ""
 fi
