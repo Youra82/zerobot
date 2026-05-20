@@ -63,6 +63,9 @@ dnabot kodiert *was die Kerze macht*. zerobot kodiert *was die Kerze macht* **un
 zerobot/
 ├── scan_and_learn.py              # Haupt-Lernprozess (Discovery + Evolver)
 ├── master_runner.py               # Cronjob-Orchestrator für Live-Trading
+├── run_pipeline.sh                # Vollständige Pipeline (Discovery → Backtest)
+├── show_results.sh                # Interaktives Analyse- & Backtest-Menü
+├── run_tests.sh                   # Pytest-Suite ausführen
 ├── run_backtest.py                # 70/30 Train/Test Backtest
 ├── run_optimizer.py               # Optuna Physics-Parameter-Optimizer
 ├── update.sh                      # Git-Update (sichert secret.json + quantum.db)
@@ -277,43 +280,32 @@ nano settings.json
 ]
 ```
 
-#### 2. Quantum State Discovery starten
+#### 2. Quantum State Discovery starten (Pipeline)
 
 ```bash
-.venv/bin/python3 scan_and_learn.py
+./run_pipeline.sh
 ```
 
-Lädt historische Daten, entdeckt Muster, bewertet sie und zeigt eine Zusammenfassung.
-Dauert je nach Anzahl der Märkte 10–30 Minuten.
+Die Pipeline lädt historische Daten, entdeckt Muster, bewertet sie und zeigt eine Backtest-Zusammenfassung. Dauert je nach Anzahl der Märkte 10–30 Minuten.
 
-Nur ein bestimmtes Pair:
+#### 3. Ergebnisse analysieren & Parameter optimieren
 
 ```bash
-.venv/bin/python3 scan_and_learn.py --symbol BTC/USDT:USDT --timeframe 4h
+./show_results.sh
 ```
 
-#### 3. Physics-Parameter optimieren (Optuna)
+| Modus | Funktion |
+|---|---|
+| **1) Backtest 70/30** | Zeigt Train- und Test-Periode im direkten Vergleich mit Overfitting-Warnung. |
+| **2) Backtest Test-only** | Nur die Out-of-Sample Testperiode (30%). |
+| **3) Backtest Pair** | Einzelnes Symbol/Timeframe backtesten. |
+| **4) Optimizer** | Optuna optimiert `min_score`, `max_apen_for_trade`, `rr_ratio`, `te_threshold` auf der OOS-Periode. |
+| **5) Optimizer Auto-Write** | Wie 4), schreibt beste Parameter automatisch in `settings.json`. |
+| **6) State Library** | Top-Patterns, Score-Verteilung und Statistiken aus der Quantum-DB. |
 
-```bash
-.venv/bin/python3 run_optimizer.py --trials 50 --capital 50
-```
+#### 4. Strategie live schalten
 
-Optimiert `min_score`, `max_apen_for_trade`, `rr_ratio`, `te_threshold` auf der Out-of-Sample Testperiode (30%).
-Schreibt beste Parameter automatisch in `settings.json`:
-
-```bash
-.venv/bin/python3 run_optimizer.py --trials 50 --capital 50 --auto-write
-```
-
-#### 4. Backtest validieren (70/30 Split)
-
-```bash
-.venv/bin/python3 run_backtest.py --capital 50
-```
-
-Zeigt Train- und Test-Periode im direkten Vergleich mit Overfitting-Warnung.
-
-#### 5. Strategie live schalten
+Nach der Optimierung (Modus 5 in `show_results.sh`) werden die optimalen Parameter automatisch in `settings.json` eingetragen. Alternativ manuell:
 
 ```bash
 nano settings.json
@@ -323,7 +315,7 @@ nano settings.json
 { "symbol": "BTC/USDT:USDT", "timeframe": "4h", "active": true }
 ```
 
-#### 6. Cronjob einrichten
+#### 5. Cronjob einrichten
 
 ```bash
 crontab -e
@@ -369,40 +361,19 @@ cd ~/zerobot && .venv/bin/python3 master_runner.py
 
 ```bash
 # Alle konfigurierten Pairs
-.venv/bin/python3 scan_and_learn.py
+./run_pipeline.sh
 
 # Nur ein bestimmtes Pair
 .venv/bin/python3 scan_and_learn.py --symbol BTC/USDT:USDT --timeframe 4h
 ```
 
-#### Backtest ausführen
-
-```bash
-# 70/30 Split (Standard)
-.venv/bin/python3 run_backtest.py --capital 50
-
-# Nur Test-Periode
-.venv/bin/python3 run_backtest.py --capital 50 --test-only
-
-# Bestimmtes Pair
-.venv/bin/python3 run_backtest.py --symbol BTC/USDT:USDT --timeframe 4h --capital 50
-```
-
-#### Optimizer ausführen
-
-```bash
-# Interaktiv (fragt ob settings.json überschrieben werden soll)
-.venv/bin/python3 run_optimizer.py --trials 50 --capital 50
-
-# Automatisch schreiben
-.venv/bin/python3 run_optimizer.py --trials 50 --capital 50 --auto-write
-```
-
 #### Tests ausführen
 
 ```bash
-.venv/bin/python3 -m pytest tests/ -v
+./run_tests.sh
 ```
+
+Führt alle Pytest-Tests aus (Sicherheitscheck vor dem Live-Betrieb).
 
 #### Bot aktualisieren
 
@@ -417,7 +388,7 @@ Sichert automatisch `secret.json` und `artifacts/db/quantum.db` vor dem `git res
 ```bash
 # Achtung: löscht alle erlernten Muster!
 rm artifacts/db/quantum.db
-.venv/bin/python3 scan_and_learn.py
+./run_pipeline.sh
 ```
 
 ---
@@ -438,14 +409,14 @@ Kapital: 50 USDT | 1% Risiko/Trade | 5× Hebel | R:R = 1:3.5 (Optuna-optimiert)
 - `secret.json` ist **nicht in Git** — wird von `update.sh` gesichert
 - `artifacts/db/quantum.db` ist **nicht in Git** — bleibt nach Updates erhalten
 - `artifacts/tracker/` ist **nicht in Git** — enthält den offenen Trade-Status pro Symbol
-- Immer erst `scan_and_learn.py` und `run_optimizer.py` bevor Live-Trading aktiviert wird
+- Immer erst `./run_pipeline.sh` bevor Live-Trading aktiviert wird
 - States mit weniger als 4 Samples (4h) werden grundsätzlich nicht gehandelt
 
 ---
 
 ## Coin & Timeframe Empfehlungen
 
-zerobot ist eine **Quantum-State-Pattern-Strategie** — er kodiert Kerzen als physikalische Zustandsvektoren und sucht in der Datenbank nach 3/4/5-Kerzen-Sequenzen mit statistisch valider Win-Rate und Physics-Alignment. Benötigt: Coins mit wiederkehrenden, lernbaren Kerzenmustern und ausreichend historische Daten.
+zerobot ist eine **Quantum-State-Pattern-Strategie** — er kodiert Kerzen als physikalische Zustandsvektoren (z.B. `B3N-TCH`) und sucht in der Datenbank nach 3/4/5-Kerzen-Sequenzen mit statistisch valider Win-Rate und Physics-Alignment. Benötigt: Coins mit wiederkehrenden, lernbaren Kerzenmustern und ausreichend historische Daten für die Quantum-State-Datenbank.
 
 ### Effektive Zeitspannen der Sequenz-Fenster
 
@@ -453,24 +424,48 @@ zerobot ist eine **Quantum-State-Pattern-Strategie** — er kodiert Kerzen als p
 |---|---|---|---|---|
 | 15m | 45 Min | 1.25h | Noise-dominiert | ❌ |
 | 30m | 1.5h | 2.5h | Marginal | ⚠️ |
-| 1h | 3h | 5h | Intraday | ✅ |
+| 1h | 3h | 5h | Intraday-Session | ✅ |
 | **2h** | **6h** | **10h** | **Mehrere Sessions** | **✅✅** |
 | **4h** | **12h** | **20h** | **Voller Handelstag** | **✅✅** |
-| **6h** | **18h** | **30h** | **Swing** | **✅✅** |
+| **6h** | **18h** | **30h** | **1.5 Tage — Swing** | **✅✅** |
 | 1d | 3d | 5d | Wochen-Muster | ✅ |
+
+Auf 15m/30m sind 3-5 Kerzen nur 45 Min bis 2.5h — zu kurz für statistisch bedeutsame wiederkehrende Muster. Ab 2h deckt eine Sequenz komplette Handelssessions ab. Die Quantum-State-Datenbank braucht außerdem ausreichend historische Kerzen für die Discovery-Phase.
 
 ### Coin-Eignung
 
-| Coin | Bewertung | Begründung |
+| Coin | Kerzenmuster-Qualität | Wiederholbarkeit | DB-Datenbasis | Bewertung |
+|---|---|---|---|---|
+| **BTC** | Exzellent — institutionelle Muster | Sehr hoch durch globale Beobachtung | Längste Historie, beste Basis | ✅✅ Beste Wahl |
+| **ETH** | Exzellent — klare, strukturierte Kerzen | Sehr hoch | Sehr gute Datenbasis | ✅✅ Sehr gut |
+| **SOL** | Sehr gut — klare Richtungskerzen | Hoch | Gute Datenbasis ab 2020 | ✅ Gut |
+| **BNB** | Gut — stabile, wiederholende Muster | Gut | Lange Datenbasis | ✅ Gut |
+| **XRP** | Gut — klare Kerzenstruktur | Gut, besonders in Range-Phasen | Sehr lange Datenbasis | ✅ Gut |
+| **AVAX** | Gut — ordentliche Kerzenformen | Mittel-hoch | Ausreichend ab 2020 | ✅ Gut |
+| **LTC** | Gut — BTC-korreliert | Gut | Lange Datenbasis | ✅ Gut |
+| **ADA** | Mittel — wenig Körper in Seitwärts | Mittel | Gute Datenbasis | ⚠️ Mittel |
+| **ARB** | Mittel — junge Datenbasis | Noch aufbauend | Kurze Datenbasis (ab 2023) | ⚠️ Mittel |
+| **DOT** | Mittel — oft indifferente Kerzen | Gering | Ausreichend | ⚠️ Mittel |
+| **LINK** | Mittel — explosiv in Bull, träge sonst | Ungleichmäßig | Ausreichend | ⚠️ Mittel |
+| **DOGE** | Schlecht — sentiment-getriebene Muster | Niedrig, nicht statistisch | Vorhanden aber unbrauchbar | ❌ Schlecht |
+| **SHIB/PEPE** | Nicht lernbar — Pump-Candles | Keine Wiederholbarkeit | Zu kurze Datenbasis | ❌❌ Nicht geeignet |
+
+### Empfohlene Kombinationen (Ranking)
+
+| Rang | Kombination | Begründung |
 |---|---|---|
-| **BTC** | ✅✅ Beste Wahl | Institutionelle Kerzenmuster, längste Datenbasis, stabiler Hurst |
-| **ETH** | ✅✅ Sehr gut | Klare Richtungskerzen, eigenständige Muster von BTC |
-| **SOL** | ✅ Gut | Klare Trending-Phasen, guter Hurst-Exponent |
-| **BNB** | ✅ Gut | Stabile Sequenzen, gute Datenbasis |
-| **XRP** | ✅ Gut | Klare Kerzenstruktur in Range- und Trendphasen |
-| **LTC** | ✅ Gut | BTC-korreliert, lange Datenbasis |
-| **DOGE** | ❌ Schlecht | Sentiment-Spikes, kein stabiler Hurst, nicht lernbar |
-| **SHIB/PEPE** | ❌❌ Nein | Pump-Candles, keine Wiederholbarkeit |
+| 🥇 1 | **BTC 4h / 6h** | Beste institutionelle Kerzenmuster, längste Datenbasis für DB |
+| 🥇 1 | **ETH 4h / 6h** | Ähnlich BTC, exzellente Sequenz-Qualität |
+| 🥈 2 | **BTC 2h / ETH 2h** | Mehr Sequenzen für schnelleres DB-Befüllen |
+| 🥉 3 | **SOL 4h** | Klare Directional-Candles, gute Sequenzabdeckung |
+| 4 | **BNB 4h** | Stabile, wiederholende Muster |
+| 4 | **XRP 4h** | Gute Sequenzen in Range- und Trendphasen |
+| 4 | **LTC 4h** | BTC-Muster, gute Datenbasis |
+| 5 | **AVAX 4h** | Gute Bullmarkt-Sequenzen |
+| ❌ | **Alles auf 15m / 30m** | Sequenzen zu kurz, kein statistischer Wert |
+| ❌ | **DOGE / SHIB** | Muster nicht wiederholbar, kein Lerneffekt |
+
+> **Hinweis:** Das Self-Learning greift nach jedem Trade. Je mehr Trades auf einem Coin/TF-Paar, desto besser wird die Quantum-State-DB. BTC 4h liefert die schnellste und zuverlässigste DB-Reife.
 
 ---
 
