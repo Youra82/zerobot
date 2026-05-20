@@ -87,7 +87,11 @@ class Exchange:
 
         while current_ts < end_ts:
             try:
-                ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, current_ts, 200)
+                page_end = min(current_ts + 200 * tf_ms, end_ts)
+                ohlcv = self.exchange.fetch_ohlcv(
+                    symbol, timeframe, current_ts, 200,
+                    params={'endTime': str(page_end)}
+                )
                 if not ohlcv:
                     break
                 ohlcv = [c for c in ohlcv if c[0] <= end_ts]
@@ -100,7 +104,7 @@ class Exchange:
                 time.sleep(10)
             except Exception as e:
                 logger.error(f"Fehler beim historischen Download: {e}")
-                time.sleep(5)
+                break
 
         if not all_ohlcv:
             return pd.DataFrame()
