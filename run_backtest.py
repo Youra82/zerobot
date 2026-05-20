@@ -103,19 +103,6 @@ def main():
     risk_cfg    = settings.get('risk_settings', {})
     active_strats = settings.get('live_trading_settings', {}).get('active_strategies', [])
 
-    # Pairs bestimmen
-    if args.symbol and args.timeframe:
-        pairs = [(args.symbol, args.timeframe)]
-    else:
-        seen, pairs = set(), []
-        for s in active_strats:
-            sym, tf = s.get('symbol'), s.get('timeframe')
-            if sym and tf and (sym, tf) not in seen:
-                pairs.append((sym, tf))
-                seen.add((sym, tf))
-        if not pairs:
-            pairs = [('BTC/USDT:USDT', '4h')]
-
     risk_pct = args.risk or risk_cfg.get('risk_per_entry_pct', 1.0)
     leverage = int(risk_cfg.get('leverage', 5))
     capital  = args.capital
@@ -138,6 +125,23 @@ def main():
     exchange = Exchange(accounts[0])
 
     db = StateDB(DB_PATH)
+
+    # Pairs bestimmen: --symbol/--timeframe > quantum.db > settings.json
+    if args.symbol and args.timeframe:
+        pairs = [(args.symbol, args.timeframe)]
+    else:
+        db_pairs = db.get_all_market_pairs()
+        if db_pairs:
+            pairs = db_pairs
+        else:
+            seen, pairs = set(), []
+            for s in active_strats:
+                sym, tf = s.get('symbol'), s.get('timeframe')
+                if sym and tf and (sym, tf) not in seen:
+                    pairs.append((sym, tf))
+                    seen.add((sym, tf))
+            if not pairs:
+                pairs = [('BTC/USDT:USDT', '4h')]
 
     split_ratio = args.split_ratio
     print(f"\n{'─' * 66}")
