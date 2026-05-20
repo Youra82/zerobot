@@ -1,99 +1,117 @@
 # zerobot — Quantum State Trading Bot
 
-Physics-informed algorithmic trading bot for cryptocurrency perpetual futures on Bitget.
-Pattern recognition using Hurst Exponent, Approximate Entropy and Transfer Entropy.
-Architecture inspired by [dnabot](https://github.com/Youra82/dnabot), extended with information-theoretic market physics.
+Physics-informierter algorithmischer Trading-Bot für Krypto-Perpetual-Futures auf Bitget.
+Mustererkennung mit Hurst-Exponent, Approximate Entropy und Transfer Entropy.
+Architektur basiert auf [dnabot](https://github.com/Youra82/dnabot), erweitert um informationstheoretische Marktphysik.
 
 ---
 
-## Concept
+## Konzept
 
-Instead of encoding candles as simple gene-strings (dnabot), zerobot encodes every candle as a **7-dimensional Quantum State** that captures both price structure and the physical regime of the market at that moment:
+Jede Kerze wird als **7-dimensionaler Quantum State** kodiert — er beschreibt nicht nur die Kerzenstruktur, sondern auch den physikalischen Zustand des Marktes zum jeweiligen Zeitpunkt:
 
 ```
 B3N-TCH
 │││ │││
-│││ ││└── Volume:   H=high / L=low (vs. 20-period MA)
-│││ │└─── Entropy:  C=calm (low ApEn) / E=excited (high ApEn)
-│││ └──── Hurst:    T=trending (H>0.55) / R=reverting (H<0.45) / N=neutral
+│││ ││└── Volumen:   H=hoch / L=niedrig (vs. 20-Perioden-MA)
+│││ │└─── Entropie:  C=ruhig (ApEn niedrig) / E=aufgewühlt (ApEn hoch)
+│││ └──── Hurst:     T=Trend (H>0.55) / R=Reversion (H<0.45) / N=Neutral
 │││
-│││ (separator)
-││└────── Wick:     U=upper / D=lower / B=both / N=none
-│└─────── Body:     1=small / 2=medium / 3=large (relative to ATR)
-└──────── Direction: B=bullish / S=bearish
+│││ (Trennzeichen)
+││└────── Docht:     U=oben / D=unten / B=beide / N=keiner
+│└─────── Körper:    1=klein / 2=mittel / 3=groß (relativ zu ATR)
+└──────── Richtung:  B=bullish / S=bearish
 ```
 
-Sequences of 3–5 states form patterns. Each pattern is stored in SQLite with win/loss statistics, Hurst and ApEn values at the time it occurred. The **Evolver** scores patterns using:
+Sequenzen aus 3–5 aufeinanderfolgenden States bilden Muster. Jedes Muster wird in einer SQLite-Datenbank gespeichert — mit Gewinn/Verlust-Statistiken sowie dem Hurst- und ApEn-Wert zum Zeitpunkt des Auftretens. Der **Evolver** bewertet Muster nach folgender Formel:
 
 ```
 score = winrate × avg_move_pct × log(1 + effective_occ)
 
 effective_occ = occ × decay × entropy_bonus × hurst_bonus
 
-entropy_bonus = 1.0 + 0.30 × (1 − mean_ApEn)   # calm markets → reliable patterns
-hurst_bonus   = 1.0 + 0.20 × |mean_Hurst − 0.5|  # extreme Hurst → structural edge
-decay         = exp(−age_days / half_life)          # older patterns lose weight
+entropy_bonus = 1.0 + 0.30 × (1 − mittl. ApEn)      # ruhige Märkte → zuverlässigere Muster
+hurst_bonus   = 1.0 + 0.20 × |mittl. Hurst − 0.5|    # extremer Hurst → struktureller Edge
+decay         = exp(−Alter_Tage / Halbwertszeit)       # alte Muster verlieren Gewicht
 ```
 
 ---
 
-## Architecture
+## Unterschied zu dnabot
+
+dnabot kodiert *was die Kerze macht*. zerobot kodiert *was die Kerze macht* **und** *in welchem physikalischen Marktregime sie auftritt*.
+
+| | **dnabot** | **zerobot** |
+|---|---|---|
+| State-Format | `B3H-UH` (6 Zeichen) | `B3N-TCH` (7 Zeichen) |
+| Mögliche States | 96 | **288** |
+| Regime-Erkennung | ADX-basiert | **Hurst-Exponent** (fraktal) |
+| Entropie-Filter | nein | **ApEn-Gate** (kein Trade bei chaotischem Markt) |
+| BTC-Einfluss | nein | **Transfer Entropy** BTC→ALT (+25% Score-Boost) |
+| Signal-Gates | 2 | **4** |
+| Optimizer | Greedy Portfolio | **Optuna** (Bayesian, OOS Calmar-Ziel) |
+
+Ein Muster das immer im Trend-Regime bei niedriger Entropie auftritt ist zuverlässiger als dasselbe Kerzenmuster in einem chaotischen Seitwärtsmarkt — das weiß dnabot nicht, zerobot schon.
+
+---
+
+## Architektur
 
 ```
 zerobot/
 ├── src/zerobot/
 │   ├── physics/
-│   │   ├── hurst.py        # R/S Analysis, rolling Hurst exponent
-│   │   ├── entropy.py      # ApEn, Shannon Entropy, Transfer Entropy (BTC→ALT)
-│   │   ├── encoder.py      # Candle → 7-char quantum state string
-│   │   ├── database.py     # SQLite StateDB (WAL mode, Hurst/ApEn per pattern)
-│   │   ├── discovery.py    # Sliding-window pattern mining
-│   │   └── evolver.py      # Physics-informed scoring + activation
+│   │   ├── hurst.py        # R/S-Analyse, rollierender Hurst-Exponent
+│   │   ├── entropy.py      # ApEn, Shannon-Entropie, Transfer Entropy (BTC→ALT)
+│   │   ├── encoder.py      # Kerze → 7-Zeichen Quantum-State-String
+│   │   ├── database.py     # SQLite StateDB (WAL-Mode, Hurst/ApEn pro Muster)
+│   │   ├── discovery.py    # Sliding-Window Pattern-Mining
+│   │   └── evolver.py      # Physics-informiertes Scoring + Aktivierung
 │   ├── strategy/
-│   │   ├── signal_logic.py # 4-gate signal filter
-│   │   └── run.py          # Live trading entry point
+│   │   ├── signal_logic.py # 4-Gate Signal-Filter
+│   │   └── run.py          # Live-Trading Entry Point
 │   ├── analysis/
-│   │   └── backtester.py   # Historical simulation engine
+│   │   └── backtester.py   # Historische Simulation
 │   └── utils/
-│       ├── exchange.py     # Bitget CCXT wrapper
-│       ├── telegram.py     # Telegram notifications
-│       ├── guardian.py     # Error recovery decorator
-│       └── trade_manager.py # Order placement + self-learning
-├── scan_and_learn.py       # Pattern discovery pipeline
-├── run_backtest.py         # 70/30 train/test backtest
-├── run_optimizer.py        # Optuna physics parameter optimizer
-├── master_runner.py        # Subprocess orchestrator
-├── settings.json           # Bot configuration
+│       ├── exchange.py     # Bitget CCXT Wrapper
+│       ├── telegram.py     # Telegram-Benachrichtigungen
+│       ├── guardian.py     # Fehlerbehandlung
+│       └── trade_manager.py # Orderplatzierung + Self-Learning
+├── scan_and_learn.py       # Pattern-Discovery-Pipeline
+├── run_backtest.py         # 70/30 Train/Test Backtest
+├── run_optimizer.py        # Optuna Physics-Parameter-Optimizer
+├── master_runner.py        # Subprocess-Orchestrator
+├── settings.json           # Bot-Konfiguration
 └── tests/
-    └── test_workflow.py    # 18 unit tests
+    └── test_workflow.py    # 18 Unit-Tests
 ```
 
 ---
 
-## Signal Generation — 4 Gates
+## Signal-Erzeugung — 4 Gates
 
-Only if all 4 gates pass does a trade get placed:
+Ein Trade wird nur platziert wenn alle 4 Stufen bestanden werden:
 
-1. **Quantum State Match** — last 3–5 candles form a known active pattern in the DB
-2. **Hurst Regime Alignment** — current market regime matches the pattern's learned regime
-3. **Entropy Filter** — current ApEn < `max_apen_for_trade` (market not too chaotic)
-4. **Transfer Entropy Boost** — if BTC leads the target (TE > threshold), score × 1.25
-
----
-
-## Backtest Results (BTC/USDT:USDT 4h, 730 days)
-
-| Period | Dates | Trades | Win-Rate | PnL | Max DD | Calmar |
-|--------|-------|--------|----------|-----|--------|--------|
-| Train 70% | May 2024 – Oct 2025 | 126 | 25.4% | +30.1% | 14.1% | 2.13 |
-| **Test 30%** | **Oct 2025 – May 2026** | **44** | **29.5%** | **+20.7%** | **9.6%** | **2.16** |
-
-Optimized by Optuna on OOS test period (anti-overfitting). Capital: 50 USDT, 1% risk/trade, 5× leverage, R:R = 1:3.5.
-Win rate is low (29%) but expected value is strongly positive: `0.295 × 3.5 − 0.705 × 1 = +0.327` per trade unit.
+1. **Quantum State Match** — die letzten 3–5 Kerzen bilden ein bekanntes aktives Muster in der DB
+2. **Hurst-Regime-Abgleich** — aktuelles Marktregime stimmt mit dem gelernten Regime des Musters überein
+3. **Entropie-Filter** — aktueller ApEn-Wert < `max_apen_for_trade` (Markt nicht zu chaotisch)
+4. **Transfer-Entropy-Boost** — wenn BTC dem Zielsymbol vorausläuft (TE > Schwellwert), Score × 1.25
 
 ---
 
-## Setup
+## Backtest-Ergebnisse (BTC/USDT:USDT 4h, 730 Tage)
+
+| Periode | Zeitraum | Trades | Win-Rate | PnL | Max DD | Calmar |
+|---------|----------|--------|----------|-----|--------|--------|
+| Train 70% | Mai 2024 – Okt 2025 | 126 | 25.4% | +30.1% | 14.1% | 2.13 |
+| **Test 30%** | **Okt 2025 – Mai 2026** | **44** | **29.5%** | **+20.7%** | **9.6%** | **2.16** |
+
+Optimiert mit Optuna auf der OOS-Test-Periode (Anti-Overfitting). Kapital: 50 USDT, 1% Risiko/Trade, 5× Hebel, R:R = 1:3.5.
+Die Win-Rate ist bewusst niedrig (29%) — der erwartete Wert pro Trade ist dennoch positiv: `0.295 × 3.5 − 0.705 × 1 = +0.33`.
+
+---
+
+## Installation
 
 ```bash
 git clone https://github.com/Youra82/zerobot.git
@@ -101,22 +119,19 @@ cd zerobot
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# Create secret.json (see template below)
-cp secret.json.example secret.json   # or create manually
 ```
 
-### secret.json format
+### secret.json anlegen
 
 ```json
 {
   "zerobot": [
     {
-      "api_key": "YOUR_BITGET_API_KEY",
-      "api_secret": "YOUR_BITGET_SECRET",
-      "passphrase": "YOUR_BITGET_PASSPHRASE",
-      "telegram_bot_token": "YOUR_BOT_TOKEN",
-      "telegram_chat_id": "YOUR_CHAT_ID"
+      "api_key": "DEIN_BITGET_API_KEY",
+      "api_secret": "DEIN_BITGET_SECRET",
+      "passphrase": "DEIN_BITGET_PASSPHRASE",
+      "telegram_bot_token": "DEIN_BOT_TOKEN",
+      "telegram_chat_id": "DEINE_CHAT_ID"
     }
   ]
 }
@@ -124,42 +139,40 @@ cp secret.json.example secret.json   # or create manually
 
 ---
 
-## Usage
+## Nutzung
 
-### 1. Pattern Discovery (build the state database)
+### 1. Pattern Discovery (Musterdatenbank aufbauen)
 
 ```bash
 .venv/bin/python3 scan_and_learn.py
-# or for a specific symbol/timeframe:
+# oder für ein bestimmtes Symbol:
 .venv/bin/python3 scan_and_learn.py --symbol BTC/USDT:USDT --timeframe 4h
 ```
 
-### 2. Optimize Physics Parameters (Optuna, OOS-validated)
+### 2. Physics-Parameter optimieren (Optuna, OOS-validiert)
 
 ```bash
 .venv/bin/python3 run_optimizer.py --trials 50 --capital 50
-# Optimizes: min_score, max_apen_for_trade, rr_ratio, te_threshold
-# Objective: maximize Calmar ratio on 30% out-of-sample test period
+# Optimiert: min_score, max_apen_for_trade, rr_ratio, te_threshold
+# Ziel: Calmar-Ratio auf 30% Out-of-Sample-Periode maximieren
 ```
 
-### 3. Validate with Backtest
+### 3. Backtest validieren
 
 ```bash
 .venv/bin/python3 run_backtest.py --capital 50
-# Shows 70/30 train/test split comparison with overfitting warnings
+# Zeigt 70/30 Train/Test-Vergleich mit Overfitting-Warnung
 ```
 
-### 4. Start Live Trading
+### 4. Live-Trading starten
 
 ```bash
 .venv/bin/python3 master_runner.py
-# or single strategy:
-.venv/bin/python3 src/zerobot/strategy/run.py --symbol BTC/USDT:USDT --timeframe 4h
 ```
 
 ---
 
-## Configuration (settings.json)
+## Konfiguration (settings.json)
 
 ```json
 {
@@ -193,23 +206,23 @@ cp secret.json.example secret.json   # or create manually
 ## VPS Deployment
 
 ```bash
-# Initial setup
+# Ersteinrichtung
 git clone https://github.com/Youra82/zerobot.git
 cd zerobot
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# create secret.json
+# secret.json anlegen
 
-# Build pattern database (first time, ~10 min)
+# Musterdatenbank aufbauen (~10 Min)
 .venv/bin/python3 scan_and_learn.py
 
-# Optimize parameters
+# Parameter optimieren
 .venv/bin/python3 run_optimizer.py --trials 50 --capital 50 --auto-write
 
-# Start bot
+# Bot starten
 .venv/bin/python3 master_runner.py
 
-# Update (preserves secret.json and quantum.db)
+# Update (secret.json und quantum.db bleiben erhalten)
 bash update.sh
 ```
 
@@ -219,30 +232,30 @@ bash update.sh
 
 ```bash
 pytest tests/test_workflow.py -v
-# 18 passed — Hurst, Entropy, Encoder, StateDB
+# 18 passed — Hurst, Entropie, Encoder, StateDB
 ```
 
 ---
 
-## Dependencies
+## Abhängigkeiten
 
-- `ccxt` — Bitget exchange API
-- `numpy` / `pandas` — data processing
-- `ta` — technical indicators (ATR)
-- `optuna` — Bayesian hyperparameter optimization
-- `requests` — Telegram notifications
-
----
-
-## Physics Background
-
-| Metric | Formula | Meaning |
-|--------|---------|---------|
-| **Hurst Exponent** | R/S Analysis | H>0.55 = trending, H<0.45 = mean-reverting, H≈0.5 = random walk |
-| **Approximate Entropy** | Template matching | Low ApEn = predictable market = patterns more reliable |
-| **Transfer Entropy** | TE(X→Y) = H(Y\|past Y) − H(Y\|past Y, past X) | Directional information flow from BTC to altcoin |
-| **Shannon Entropy** | −Σ p(x) log p(x) | Normalized entropy of return distribution |
+- `ccxt` — Bitget Exchange API
+- `numpy` / `pandas` — Datenverarbeitung
+- `ta` — Technische Indikatoren (ATR)
+- `optuna` — Bayesianische Hyperparameter-Optimierung
+- `requests` — Telegram-Benachrichtigungen
 
 ---
 
-*Built as an evolution of [dnabot](https://github.com/Youra82/dnabot) — same architecture, richer physics-informed state encoding.*
+## Physikalischer Hintergrund
+
+| Metrik | Formel | Bedeutung |
+|--------|--------|-----------|
+| **Hurst-Exponent** | R/S-Analyse | H>0.55 = trendend, H<0.45 = mean-revertierend, H≈0.5 = Zufallslauf |
+| **Approximate Entropy** | Template-Matching | Niedriger ApEn = vorhersagbarer Markt = Muster zuverlässiger |
+| **Transfer Entropy** | TE(X→Y) = H(Y\|past Y) − H(Y\|past Y, past X) | Gerichteter Informationsfluss von BTC zum Altcoin |
+| **Shannon-Entropie** | −Σ p(x) log p(x) | Normierte Entropie der Renditeverteilung |
+
+---
+
+*Weiterentwicklung von [dnabot](https://github.com/Youra82/dnabot) — gleiche Architektur, reicheres physics-informiertes State-Encoding.*
