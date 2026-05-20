@@ -1,0 +1,11 @@
+secret.json
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+artifacts/db/*.db
+artifacts/tracker/*.json
+logs/
+*.bak
+.DS_Store
