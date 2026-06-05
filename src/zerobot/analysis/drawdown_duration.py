@@ -83,7 +83,7 @@ def analyze_drawdowns(trades, start_capital):
             'dur_days': dur_days,
         })
 
-    return dd_periods
+    return dd_periods, equity, timestamps
 
 
 def get_telegram_credentials():
@@ -107,32 +107,38 @@ def send_telegram_photo(token, chat_id, path, caption=''):
         print(f"  Telegram Fehler: {e}")
 
 
-def create_chart(all_dd_entries):
-    """all_dd_entries: list of dicts with keys depth, dur_days, label, is_open"""
+def create_chart(all_dd_entries, equity_curve=None, equity_ts=None, equity_dd_periods=None, equity_label=''):
+    """all_dd_entries: list of dicts with keys depth, dur_days, label, is_open.
+       equity_curve/equity_ts: from the config with the most dd_periods, for panel 3."""
     if not all_dd_entries:
         return None
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
+        import matplotlib.dates as mdates
     except ImportError:
         print("  matplotlib nicht verfügbar — kein Chart.")
         return None
 
     # Separate closed (known duration) from open
-    closed = [e for e in all_dd_entries if not (e['dur_days'] != e['dur_days'])]
-    all_durs = np.array([e['dur_days'] for e in closed], dtype=float)
-    all_deps = np.array([e['depth']    for e in closed], dtype=float)
-    open_dots = [e for e in all_dd_entries
-                 if not (e['dur_days'] != e['dur_days']) and e['is_open']]
+    closed    = [e for e in all_dd_entries if not (e['dur_days'] != e['dur_days'])]
+    all_durs  = np.array([e['dur_days'] for e in closed], dtype=float)
+    all_deps  = np.array([e['depth']    for e in closed], dtype=float)
+    open_dots = [e for e in closed if e['is_open']]
 
     if len(closed) == 0:
         return None
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    has_equity = (equity_curve is not None and equity_ts is not None
+                  and len(equity_curve) > 1)
+    ncols = 3 if has_equity else 2
+    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols + 1, 5))
+    ax1, ax2 = axes[0], axes[1]
+    ax3 = axes[2] if has_equity else None
+
     fig.patch.set_facecolor('#0f172a')
-    for ax in [ax1, ax2]:
+    for ax in axes:
         ax.set_facecolor('#1e293b')
         ax.tick_params(colors='#94a3b8')
         for spine in ax.spines.values():
@@ -142,20 +148,17 @@ def create_chart(all_dd_entries):
         ax.yaxis.label.set_color('#94a3b8')
         ax.title.set_color('white')
 
-    # Left: scatter — closed in red, open in orange
-    closed_no_open = [e for e in closed if not e['is_open']]
-    if closed_no_open:
-        ax1.scatter([e['depth'] for e in closed_no_open],
-                    [e['dur_days'] for e in closed_no_open],
-                    color='#ef4444', alpha=0.75, edgecolors='#334155',
-                    linewidths=0.5, s=55, label=f'Abgeschlossen ({len(closed_no_open)})')
-    if open_dots:
-        ax1.scatter([e['depth'] for e in open_dots],
-                    [e['dur_days'] for e in open_dots],
-                    color='#f59e0b', alpha=0.85, edgecolors='#334155',
-                    linewidths=0.5, s=70, marker='^',
-                    label=f'Noch offen ({len(open_dots)})')
-
+    # Panel 1: scatter depth vs duration
+    closed_done = [e for e in closed if not e['is_open']]
+    for dots, color, marker, label_pfx in [
+        (closed_done, '#ef4444', 'o', 'Abgeschlossen'),
+        (open_dots,   '#f59e0b', '^', 'Noch offen'),
+    ]:
+        if dots:
+            ax1.scatter([e['depth'] for e in dots], [e['dur_days'] for e in dots],
+                        color=color, alpha=0.75, edgecolors='#334155',
+                        linewidths=0.5, s=55, marker=marker,
+                        label=f'{label_pfx} ({len(dots)})')
     if len(all_durs) >= 3:
         try:
             z = np.polyfit(all_deps, all_durs, 1)
@@ -165,25 +168,78 @@ def create_chart(all_dd_entries):
                      linewidth=1.0, alpha=0.6, label='Trend')
         except Exception:
             pass
-
     ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
     ax1.set_xlabel('DD Tiefe %', color='#94a3b8')
     ax1.set_ylabel('Dauer (Tage)', color='#94a3b8')
     ax1.set_title(f'DD Tiefe vs Dauer — alle Configs ({len(closed)} Perioden)', color='white', fontsize=10)
 
-    # Right: histogram of all durations (closed + open = min-duration)
+    # Panel 2: histogram of all durations
     bins = max(1, min(20, len(all_durs)))
     ax2.hist(all_durs, bins=bins, color='#ef4444', edgecolor='#1e293b',
-             linewidth=0.3, alpha=0.85, label='Alle')
+             linewidth=0.3, alpha=0.85)
     median_dur = float(np.median(all_durs))
-    ax2.axvline(median_dur, color='#f59e0b', linestyle='--', linewidth=1.4,
-                label=f'Median: {median_dur:.0f}d')
+    p90_dur    = float(np.percentile(all_durs, 90))
+    ax2.axvline(median_dur, color='#f59e0b', linestyle='-',  linewidth=1.4,
+                label=f'Ø {median_dur:.0f}d')
+    ax2.axvline(p90_dur,    color='#ef4444', linestyle='--', linewidth=1.2,
+                label=f'90. Pz {p90_dur:.0f}d')
     ax2.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
     ax2.set_xlabel('Dauer (Tage)', color='#94a3b8')
     ax2.set_ylabel('Häufigkeit', color='#94a3b8')
-    ax2.set_title('Drawdown-Dauer Verteilung (alle Configs)', color='white', fontsize=10)
+    ax2.set_title('Verteilung der Erholungsdauern (alle Configs)', color='white', fontsize=10)
 
-    fig.suptitle('ZeroBot Drawdown Duration — Alle Strategien kombiniert', color='white', fontsize=12)
+    # Panel 3: equity curve with drawdown zones
+    if ax3 is not None:
+        # Build equity timestamps (skip first None entry)
+        ts_valid = [t for t in equity_ts[1:] if t is not None]
+        eq_valid  = equity_curve[1:len(ts_valid) + 1]
+        try:
+            ts_dt = pd.to_datetime(ts_valid, utc=True)
+            ax3.plot(ts_dt, eq_valid, color='#3b82f6', linewidth=1.2, label='Equity', zorder=3)
+
+            # Peak line
+            peaks = []
+            peak = equity_curve[0]
+            for v in eq_valid:
+                peak = max(peak, v)
+                peaks.append(peak)
+            ax3.plot(ts_dt, peaks, color='#16a34a', linewidth=0.8,
+                     linestyle='--', alpha=0.55, label='Peak', zorder=2)
+
+            # Shade drawdown zones
+            if equity_dd_periods:
+                last_ts = ts_dt[-1] if len(ts_dt) else None
+                for dd in equity_dd_periods:
+                    if not dd['start']:
+                        continue
+                    try:
+                        t0 = pd.to_datetime(dd['start'], utc=True)
+                        t1 = (pd.to_datetime(dd['end'], utc=True)
+                              if dd['end'] else last_ts)
+                        if t0 is not None and t1 is not None and not pd.isna(t0) and not pd.isna(t1):
+                            ax3.axvspan(t0, t1, color='#ef4444', alpha=0.15, zorder=1)
+                    except Exception:
+                        pass
+
+            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+            plt.setp(ax3.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=7)
+        except Exception:
+            ax3.text(0.5, 0.5, 'Kein Equity-Chart', transform=ax3.transAxes,
+                     color='#94a3b8', ha='center', va='center')
+
+        ax3.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
+        ax3.set_xlabel('Datum', color='#94a3b8')
+        ax3.set_ylabel('Equity (USDT)', color='#94a3b8')
+        ax3.set_title(f'Equity-Kurve mit Drawdown-Zonen\n({equity_label})', color='white', fontsize=10)
+
+    n_closed  = len(closed_done)
+    avg_depth = float(np.mean(all_deps)) if len(all_deps) > 0 else 0
+    avg_dur   = float(np.mean(all_durs)) if len(all_durs) > 0 else 0
+    fig.suptitle(
+        f'ZeroBot Drawdown Duration | {len(closed)} Perioden | Ø Tiefe {avg_depth:.1f}% | Ø Erholung {avg_dur:.0f}d',
+        color='white', fontsize=12
+    )
     plt.tight_layout()
 
     path = '/tmp/zerobot_drawdown_duration.png'
@@ -214,7 +270,12 @@ def main():
     print(f"  Zeitraum: {args.start_date} bis {args.end_date}  |  Kapital: {args.capital} USDT")
     print()
 
-    all_combined = []  # all dd entries across configs for combined chart
+    all_combined  = []  # all dd entries across configs for combined chart
+    best_equity   = None  # equity curve for the config with most dd_periods
+    best_equity_ts = None
+    best_dd_for_chart = None
+    best_dd_count = -1
+    best_label    = ''
 
     for fn, cfg in configs:
         symbol    = cfg['market']['symbol']
@@ -233,7 +294,7 @@ def main():
             print(f"\n  {fn}: Keine Trades.")
             continue
 
-        dd_periods = analyze_drawdowns(trades, args.capital)
+        dd_periods, equity_curve, equity_ts = analyze_drawdowns(trades, args.capital)
 
         print(f"\n{'─'*80}")
         print(f"  Config: {fn}  [{symbol} {timeframe}]")
@@ -285,9 +346,23 @@ def main():
                 'is_open':  dd['end'] is None,
             })
 
+        # Keep the equity curve from the config with the most dd_periods
+        if len(dd_periods) > best_dd_count:
+            best_dd_count     = len(dd_periods)
+            best_equity       = equity_curve
+            best_equity_ts    = equity_ts
+            best_dd_for_chart = dd_periods
+            best_label        = label
+
     print("\n" + "=" * 80)
 
-    chart_path = create_chart(all_combined)
+    chart_path = create_chart(
+        all_combined,
+        equity_curve=best_equity,
+        equity_ts=best_equity_ts,
+        equity_dd_periods=best_dd_for_chart,
+        equity_label=best_label,
+    )
 
     if chart_path and not args.no_telegram:
         token, chat_id = get_telegram_credentials()
