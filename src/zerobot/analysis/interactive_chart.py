@@ -3,10 +3,10 @@
 ZeroBot Interaktive Charts (Modus 4)
 
 Generiert Plotly-HTML mit:
-  - Candlestick-Chart mit Renko-Signal-Markern
+  - Renko-Brick-Chart (echte Renko-Kerzen, keine OHLCV)
   - Entry/Exit Trade-Marker (Long/Short, TP/SL)
-  - Equity-Curve Subplot (rechte Y-Achse)
-  - Volumen-Panel
+  - Equity-Curve (rechte Y-Achse)
+  - Volumen-Panel (pro Brick)
   - ATR-Panel
 """
 
@@ -47,66 +47,203 @@ def _load_all_configs() -> list:
     return configs
 
 
+def _build_renko_bricks(df, strategy_params: dict) -> tuple:
+    """
+    Baut Renko-Bricks aus OHLCV und gibt ein DataFrame mit
+    OHLC-Daten pro Brick zurueck (brick_idx als Index).
+
+    Jeder Brick:
+      open  = base-Preis vor dem Brick
+      close = base-Preis nach dem Brick
+      high  = max(open, close)
+      low   = min(open, close)
+      timestamp = Timestamp der Kerze die den Brick ausgeloest hat
+      direction = +1 (up) / -1 (down)
+      volume, atr = Werte der ausloesenden Kerze
+
+    Gibt (brick_df, brick_size) zurueck.
+    """
+    import pandas as pd
+    from zerobot.strategy.renko_engine import RenkoEngine
+
+    engine     = RenkoEngine(settings=strategy_params)
+    brick_size = engine._compute_brick_size(df)
+    if brick_size <= 0:
+        return pd.DataFrame(), brick_size
+
+    closes     = df['close'].values
+    timestamps = df.index.tolist()
+    has_vol    = 'volume' in df.columns
+    volumes    = df['volume'].values if has_vol else None
+    has_atr    = 'atr' in df.columns
+    atrs       = df['atr'].values if has_atr else None
+
+    current_base = closes[0]
+    bricks = []
+
+    for i, close in enumerate(closes):
+        ts    = timestamps[i]
+        vol   = float(volumes[i]) if volumes is not None else 0.0
+        atr_v = float(atrs[i])   if atrs    is not None else 0.0
+
+        while close >= current_base + brick_size:
+            o = current_base
+            c = current_base + brick_size
+            bricks.append({
+                'timestamp': ts,
+                'open':      o,
+                'close':     c,
+                'high':      c,
+                'low':       o,
+                'direction': 1,
+                'volume':    vol,
+                'atr':       atr_v,
+            })
+            current_base = c
+
+        while close <= current_base - brick_size:
+            o = current_base
+            c = current_base - brick_size
+            bricks.append({
+                'timestamp': ts,
+                'open':      o,
+                'close':     c,
+                'high':      o,
+                'low':       c,
+                'direction': -1,
+                'volume':    vol,
+                'atr':       atr_v,
+            })
+            current_base = c
+
+    if not bricks:
+        return pd.DataFrame(), brick_size
+
+    brick_df = pd.DataFrame(bricks)
+    brick_df.index.name = 'brick_idx'
+    return brick_df, brick_size
+
+
+def _detect_signals(brick_df, strategy_params: dict) -> list:
+    """
+    Gibt Liste von Brick-Indizes zurueck an denen ein Renko-Signal vorlag.
+    Format: [(brick_idx, direction), ...] wobei direction = +1 LONG, -1 SHORT
+    """
+    trend_min = int(strategy_params.get('trend_min_bricks', 3))
+    reversal  = int(strategy_params.get('reversal_bricks', 2))
+    window    = trend_min + reversal
+    dirs      = brick_df['direction'].tolist()
+    signals   = []
+
+    for i in range(window - 1, len(dirs)):
+        rev_slice   = dirs[i - reversal + 1: i + 1]
+        trend_slice = dirs[i - reversal - trend_min + 1: i - reversal + 1]
+
+        if all(d == 1  for d in rev_slice) and all(d == -1 for d in trend_slice):
+            signals.append((i, 1))   # LONG
+        elif all(d == -1 for d in rev_slice) and all(d == 1  for d in trend_slice):
+            signals.append((i, -1))  # SHORT
+
+    return signals
+
+
+def _ts_to_brick(brick_df, ts_str: str) -> int:
+    """Gibt den naechsten Brick-Index zum gegebenen Timestamp-String zurueck."""
+    import pandas as pd
+    try:
+        ts = pd.to_datetime(ts_str, utc=True)
+        brick_ts = pd.to_datetime(brick_df['timestamp'], utc=True, errors='coerce')
+        idx = (brick_ts - ts).abs().idxmin()
+        return int(idx)
+    except Exception:
+        return 0
+
+
 def _generate_chart(symbol: str, timeframe: str,
                     start_date: str, end_date: str,
                     start_capital: float,
                     strategy_params: dict, risk_params: dict) -> str:
-    """Generiert HTML-Chart fuer ein Symbol. Gibt Pfad zur HTML-Datei zurueck."""
+    """Generiert HTML-Renko-Chart. Gibt Pfad zur HTML-Datei zurueck."""
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
         import ta
+        import pandas as pd
     except ImportError:
-        print(f'{RED}Fehler: plotly / ta-lib nicht installiert.{NC}')
+        print(f'{RED}Fehler: plotly / ta nicht installiert.{NC}')
         return ''
 
     from zerobot.analysis.backtester import load_data, run_backtest
-    from zerobot.strategy.renko_engine import RenkoEngine
 
     print(f'INFO: Lade OHLCV-Daten fuer {symbol} {timeframe}...')
     df = load_data(symbol, timeframe, start_date, end_date)
     if df is None or df.empty:
-        print(f'INFO: {RED}Keine Daten verfuegbar fuer {symbol} ({timeframe}).{NC}')
+        print(f'INFO: {RED}Keine Daten fuer {symbol} ({timeframe}).{NC}')
         return ''
 
     # ATR berechnen
-    atr_indicator = ta.volatility.AverageTrueRange(
+    atr_ind = ta.volatility.AverageTrueRange(
         high=df['high'], low=df['low'], close=df['close'], window=14)
-    df['atr'] = atr_indicator.average_true_range()
+    df['atr'] = atr_ind.average_true_range()
     df.dropna(subset=['atr'], inplace=True)
 
-    # Renko-Signale hinzufuegen
-    engine    = RenkoEngine(settings=strategy_params)
-    df_renko  = engine.process_dataframe(df.copy())
+    # Renko-Bricks bauen
+    print('INFO: Berechne Renko-Bricks...')
+    brick_df, brick_size = _build_renko_bricks(df, strategy_params)
+    if brick_df.empty:
+        print(f'{RED}Keine Bricks berechnet.{NC}')
+        return ''
 
-    # Renko-Signalpunkte
-    long_sig_mask  = df_renko['renko_signal'] == 1
-    short_sig_mask = df_renko['renko_signal'] == -1
+    n_bricks = len(brick_df)
+    x_idx    = list(range(n_bricks))  # sequenzieller Brick-Index als X
 
-    print(f'INFO: Fuehre Backtest durch...')
+    # Tick-Labels: gleichmaessig verteilte Timestamps
+    n_ticks   = min(20, n_bricks)
+    tick_step = max(1, n_bricks // n_ticks)
+    tick_vals = list(range(0, n_bricks, tick_step))
+    tick_text = [str(brick_df.iloc[i]['timestamp'])[:10] for i in tick_vals]
+
+    # Renko-Signale
+    signals   = _detect_signals(brick_df, strategy_params)
+    long_sigs  = [i for i, d in signals if d ==  1]
+    short_sigs = [i for i, d in signals if d == -1]
+
+    # Backtest
+    print('INFO: Fuehre Backtest durch...')
     res    = run_backtest(df.copy(), strategy_params, risk_params,
                           start_capital=start_capital, return_trades=True)
     trades = res.get('trades', [])
-
-    # Equity-Kurve
-    cap_times = [str(df.index[0])]
-    cap_vals  = [start_capital]
-    for t in trades:
-        cap_times.append(t.get('exit_time', ''))
-        cap_vals.append(t.get('capital_after', start_capital))
 
     pnl_pct  = res.get('total_pnl_pct', 0.0)
     win_rate = res.get('win_rate', 0.0)
     max_dd   = res.get('max_drawdown_pct', 0.0)
     n_trades = res.get('trades_count', 0)
 
-    # Trade-Listen
+    # Equity-Kurve auf Brick-Index-Basis
+    eq_x = [0]
+    eq_y = [start_capital]
+    for t in trades:
+        bx = _ts_to_brick(brick_df, t.get('exit_time', ''))
+        eq_x.append(bx)
+        eq_y.append(t.get('capital_after', start_capital))
+
+    # Trade-Marker auf Brick-Basis
     long_entries  = [t for t in trades if t.get('side') == 'long']
     short_entries = [t for t in trades if t.get('side') == 'short']
     tp_exits      = [t for t in trades if t.get('win')]
     sl_exits      = [t for t in trades if not t.get('win')]
 
-    # Figur: 3 Panels
+    def _entry_bx(t):
+        return _ts_to_brick(brick_df, t.get('entry_time', ''))
+
+    def _exit_bx(t):
+        return _ts_to_brick(brick_df, t.get('exit_time', ''))
+
+    # Farben
+    up_color   = '#26a69a'
+    down_color = '#ef5350'
+
+    # --- Figur: 3 Panels ---
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
@@ -116,99 +253,112 @@ def _generate_chart(symbol: str, timeframe: str,
             [{'secondary_y': False}],
         ],
         vertical_spacing=0.020,
-        row_heights=[0.60, 0.15, 0.25],
-        subplot_titles=['', 'Volumen', 'ATR  (Stop-Loss-Basis)'],
+        row_heights=[0.62, 0.14, 0.24],
+        subplot_titles=['', 'Volumen', 'ATR'],
     )
 
-    # --- Panel 1: Candlestick ---
+    # --- Panel 1: Renko-Candlestick ---
+    renko_colors = [up_color if d == 1 else down_color
+                    for d in brick_df['direction']]
+    hover_text = [
+        f'Brick #{i}<br>Zeit: {str(brick_df.iloc[i]["timestamp"])[:16]}<br>'
+        f'Open: {brick_df.iloc[i]["open"]:.4f}<br>Close: {brick_df.iloc[i]["close"]:.4f}<br>'
+        f'Dir: {"▲ UP" if brick_df.iloc[i]["direction"] == 1 else "▼ DOWN"}'
+        for i in range(n_bricks)
+    ]
     fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['open'], high=df['high'],
-        low=df['low'],   close=df['close'],
-        name='OHLC',
-        increasing_line_color='#26a69a',
-        decreasing_line_color='#ef5350',
+        x=x_idx,
+        open=brick_df['open'],
+        high=brick_df['high'],
+        low=brick_df['low'],
+        close=brick_df['close'],
+        name='Renko',
+        increasing_line_color=up_color,
+        increasing_fillcolor=up_color,
+        decreasing_line_color=down_color,
+        decreasing_fillcolor=down_color,
         showlegend=True,
+        text=hover_text,
+        hoverinfo='text',
     ), row=1, col=1, secondary_y=False)
 
-    # Renko LONG-Signale (kleine grüne Diamanten)
-    if long_sig_mask.any():
+    # Renko LONG-Signale (grüne Rauten unter dem Brick)
+    if long_sigs:
+        sig_y = [float(brick_df.iloc[i]['low']) * 0.997 for i in long_sigs]
         fig.add_trace(go.Scatter(
-            x=df_renko.index[long_sig_mask],
-            y=df_renko.loc[long_sig_mask, 'low'] * 0.998,
+            x=long_sigs, y=sig_y,
             mode='markers',
-            marker=dict(symbol='diamond', size=8, color='#26a69a',
+            marker=dict(symbol='diamond', size=9, color='#00e676',
                         line=dict(color='#ffffff', width=0.5)),
-            name='Renko LONG',
-            hovertemplate='Renko LONG<br>%{x}<extra></extra>',
+            name='Renko LONG-Signal',
+            hovertemplate='LONG Signal<br>Brick %{x}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
-    # Renko SHORT-Signale (kleine rote Diamanten)
-    if short_sig_mask.any():
+    # Renko SHORT-Signale (rote Rauten ueber dem Brick)
+    if short_sigs:
+        sig_y = [float(brick_df.iloc[i]['high']) * 1.003 for i in short_sigs]
         fig.add_trace(go.Scatter(
-            x=df_renko.index[short_sig_mask],
-            y=df_renko.loc[short_sig_mask, 'high'] * 1.002,
+            x=short_sigs, y=sig_y,
             mode='markers',
-            marker=dict(symbol='diamond', size=8, color='#ef5350',
+            marker=dict(symbol='diamond', size=9, color='#ff1744',
                         line=dict(color='#ffffff', width=0.5)),
-            name='Renko SHORT',
-            hovertemplate='Renko SHORT<br>%{x}<extra></extra>',
+            name='Renko SHORT-Signal',
+            hovertemplate='SHORT Signal<br>Brick %{x}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
     # Entry Long (grüne Dreiecke)
     if long_entries:
+        bx_list = [_entry_bx(t) for t in long_entries]
+        ep_list = [t['entry_price'] for t in long_entries]
         fig.add_trace(go.Scatter(
-            x=[t['entry_time'] for t in long_entries],
-            y=[t['entry_price'] for t in long_entries],
-            mode='markers',
+            x=bx_list, y=ep_list, mode='markers',
             marker=dict(symbol='triangle-up', size=16, color='#26a69a',
                         line=dict(color='#ffffff', width=1)),
             name='Entry Long ▲',
-            hovertemplate='Entry Long<br>%{x}<br>Preis: %{y:.4f}<extra></extra>',
+            hovertemplate='Entry Long<br>Brick %{x}<br>Preis: %{y:.4f}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
     # Entry Short (orange Dreiecke)
     if short_entries:
+        bx_list = [_entry_bx(t) for t in short_entries]
+        ep_list = [t['entry_price'] for t in short_entries]
         fig.add_trace(go.Scatter(
-            x=[t['entry_time'] for t in short_entries],
-            y=[t['entry_price'] for t in short_entries],
-            mode='markers',
+            x=bx_list, y=ep_list, mode='markers',
             marker=dict(symbol='triangle-down', size=16, color='#ffa726',
                         line=dict(color='#ffffff', width=1)),
             name='Entry Short ▼',
-            hovertemplate='Entry Short<br>%{x}<br>Preis: %{y:.4f}<extra></extra>',
+            hovertemplate='Entry Short<br>Brick %{x}<br>Preis: %{y:.4f}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
     # Exit TP (cyan Kreise)
     if tp_exits:
+        bx_list = [_exit_bx(t) for t in tp_exits]
+        ep_list = [t['exit_price'] for t in tp_exits]
         fig.add_trace(go.Scatter(
-            x=[t['exit_time'] for t in tp_exits],
-            y=[t['exit_price'] for t in tp_exits],
-            mode='markers',
+            x=bx_list, y=ep_list, mode='markers',
             marker=dict(symbol='circle', size=13, color='#00bcd4',
                         line=dict(color='#ffffff', width=1)),
             name='Exit TP ✓',
-            hovertemplate='Exit TP<br>%{x}<br>Preis: %{y:.4f}<br>PnL: %{customdata:.4f} USDT<extra></extra>',
+            hovertemplate='Exit TP<br>Brick %{x}<br>Preis: %{y:.4f}<br>PnL: %{customdata:.4f} USDT<extra></extra>',
             customdata=[t.get('pnl_usd', 0) for t in tp_exits],
         ), row=1, col=1, secondary_y=False)
 
     # Exit SL (rote ×)
     if sl_exits:
+        bx_list = [_exit_bx(t) for t in sl_exits]
+        ep_list = [t['exit_price'] for t in sl_exits]
         fig.add_trace(go.Scatter(
-            x=[t['exit_time'] for t in sl_exits],
-            y=[t['exit_price'] for t in sl_exits],
-            mode='markers',
+            x=bx_list, y=ep_list, mode='markers',
             marker=dict(symbol='x', size=14, color='#ef5350',
                         line=dict(color='#ef5350', width=3)),
             name='Exit SL ✗',
-            hovertemplate='Exit SL<br>%{x}<br>Preis: %{y:.4f}<br>PnL: %{customdata:.4f} USDT<extra></extra>',
+            hovertemplate='Exit SL<br>Brick %{x}<br>Preis: %{y:.4f}<br>PnL: %{customdata:.4f} USDT<extra></extra>',
             customdata=[t.get('pnl_usd', 0) for t in sl_exits],
         ), row=1, col=1, secondary_y=False)
 
     # Equity-Kurve (rechte Y-Achse)
     fig.add_trace(go.Scatter(
-        x=cap_times,
-        y=cap_vals,
+        x=eq_x, y=eq_y,
         mode='lines',
         line=dict(color='#5c9bd6', width=1.5),
         name='Equity',
@@ -216,66 +366,46 @@ def _generate_chart(symbol: str, timeframe: str,
     ), row=1, col=1, secondary_y=True)
 
     # --- Panel 2: Volumen ---
-    if 'volume' in df.columns:
-        vol_colors = ['#26a69a' if c >= o else '#ef5350'
-                      for c, o in zip(df['close'], df['open'])]
-        fig.add_trace(go.Bar(
-            x=df.index, y=df['volume'],
-            marker_color=vol_colors,
-            name='Volumen', showlegend=False, opacity=0.65,
-        ), row=2, col=1)
+    vol_colors = [up_color if d == 1 else down_color
+                  for d in brick_df['direction']]
+    fig.add_trace(go.Bar(
+        x=x_idx, y=brick_df['volume'],
+        marker_color=vol_colors,
+        name='Volumen', showlegend=False, opacity=0.65,
+    ), row=2, col=1)
 
     # --- Panel 3: ATR ---
-    atr_ser = df['atr']
     fig.add_trace(go.Scatter(
-        x=df.index, y=atr_ser,
+        x=x_idx, y=brick_df['atr'],
         mode='lines', line=dict(color='#42a5f5', width=1.3),
         fill='tozeroy', fillcolor='rgba(66,165,245,0.08)',
         name='ATR', showlegend=False,
         hovertemplate='ATR: %{y:.4f}<extra></extra>',
     ), row=3, col=1)
 
-    # SL-Abstand auf ATR-Panel markieren (Entry-Punkte als Kreis)
-    if trades:
-        atr_mult = risk_params.get('atr_multiplier_sl', 2.0)
-        for t in trades:
-            try:
-                ts_key = t['entry_time']
-                atr_at_entry = float(atr_ser.asof(
-                    atr_ser.index[atr_ser.index.get_indexer([ts_key], method='nearest')[0]]
-                )) if hasattr(atr_ser.index, 'get_indexer') else float(atr_ser.mean())
-            except Exception:
-                atr_at_entry = float(atr_ser.mean())
-        # Batch: alle Entry-ATR-Punkte
-        entry_times = [t['entry_time'] for t in trades]
-        entry_atrs  = []
-        for et in entry_times:
-            try:
-                idx = atr_ser.index.get_indexer([et], method='nearest')[0]
-                entry_atrs.append(float(atr_ser.iloc[idx]))
-            except Exception:
-                entry_atrs.append(float(atr_ser.mean()))
-        fig.add_trace(go.Scatter(
-            x=entry_times, y=entry_atrs, mode='markers',
-            marker=dict(symbol='circle-open', size=9, color='#ffa726',
-                        line=dict(width=2)),
-            showlegend=False,
-            hovertemplate='ATR bei Entry: %{y:.4f}<extra></extra>',
-        ), row=3, col=1)
-
-    # ATR-MA als Referenzlinie
-    atr_ma = atr_ser.rolling(20, min_periods=1).mean()
+    # ATR MA(20) als gestrichelte Referenzlinie
+    import pandas as pd
+    atr_series = brick_df['atr']
+    atr_ma     = atr_series.rolling(20, min_periods=1).mean()
     fig.add_trace(go.Scatter(
-        x=df.index, y=atr_ma,
+        x=x_idx, y=atr_ma,
         mode='lines', line=dict(color='rgba(255,167,38,0.5)', width=1, dash='dot'),
-        name='ATR MA(20)', showlegend=False,
+        showlegend=False,
         hovertemplate='ATR-MA: %{y:.4f}<extra></extra>',
     ), row=3, col=1)
 
-    # Layout
+    # Brick-Größe als horizontale Linie auf ATR-Panel
+    fig.add_hline(y=brick_size, line_color='rgba(255,255,255,0.25)',
+                  line_dash='dash', line_width=1, row=3, col=1,
+                  annotation_text=f'Brick={brick_size:.4f}',
+                  annotation_font_color='rgba(255,255,255,0.5)',
+                  annotation_position='top left')
+
+    # --- Layout ---
     sign       = '+' if pnl_pct >= 0 else ''
     title_text = (
         f'{symbol} {timeframe} — ZeroBot Renko | '
+        f'Bricks: {n_bricks} | Brick-Groesse: {brick_size:.4f} | '
         f'Trades: {n_trades} | WR: {win_rate:.1f}% | '
         f'PnL: {sign}{pnl_pct:.1f}% | MaxDD: {max_dd:.1f}%'
     )
@@ -287,19 +417,30 @@ def _generate_chart(symbol: str, timeframe: str,
         legend=dict(orientation='h', yanchor='bottom', y=1.01,
                     xanchor='center', x=0.5, font=dict(size=11)),
         height=1050,
-        margin=dict(l=60, r=70, t=80, b=40),
+        margin=dict(l=60, r=80, t=90, b=40),
         yaxis2=dict(title='Equity (USDT)', showgrid=False,
                     tickfont=dict(color='#5c9bd6'),
                     title_font=dict(color='#5c9bd6')),
     )
+
+    # X-Achse: Brick-Index mit Datum-Labels
+    xaxis_cfg = dict(
+        tickmode='array',
+        tickvals=tick_vals,
+        ticktext=tick_text,
+        tickangle=-45,
+        title='Brick-Index (Datum)',
+    )
+    fig.update_xaxes(xaxis_cfg)
     fig.update_yaxes(title_text='Preis', row=1, col=1)
     fig.update_yaxes(title_text='Vol',   row=2, col=1)
     fig.update_yaxes(title_text='ATR',   row=3, col=1)
 
+    # Speichern
     os.makedirs(CHARTS_DIR, exist_ok=True)
     safe_name  = symbol.replace('/', '').replace(':', '')
-    ts         = datetime.now().strftime('%Y%m%d_%H%M%S')
-    chart_path = os.path.join(CHARTS_DIR, f'chart_{safe_name}_{timeframe}_{ts}.html')
+    ts_stamp   = datetime.now().strftime('%Y%m%d_%H%M%S')
+    chart_path = os.path.join(CHARTS_DIR, f'chart_{safe_name}_{timeframe}_{ts_stamp}.html')
     fig.write_html(chart_path)
     return chart_path
 
@@ -308,7 +449,7 @@ def _send_via_telegram(chart_paths: list, bot_token: str, chat_id: str):
     import requests
     for path in chart_paths:
         filename = os.path.basename(path)
-        caption  = f'ZeroBot Chart: {filename.replace("chart_", "").replace(".html", "")}'
+        caption  = f'ZeroBot Renko-Chart: {filename.replace("chart_", "").replace(".html", "")}'
         try:
             with open(path, 'rb') as f:
                 requests.post(
@@ -337,12 +478,10 @@ def run_interactive_chart():
     for idx, cfg in enumerate(configs, 1):
         meta    = cfg.get('_meta', {})
         pnl     = meta.get('pnl_pct')
-        pnl_str = f'  [+{pnl:.1f}%]' if pnl and pnl > 0 else (
-                  f'  [{pnl:.1f}%]' if pnl is not None else '')
+        pnl_str = (f'  [+{pnl:.1f}%]' if pnl and pnl > 0
+                   else f'  [{pnl:.1f}%]' if pnl is not None else '')
         clean   = cfg['_filename'].replace('config_', '').replace('.json', '')
-        mkt     = cfg.get('market', {})
-        sym_str = f"{mkt.get('symbol', '?')} {mkt.get('timeframe', '?')}"
-        print(f'{idx:>3}) {clean:<30}{CYAN}{pnl_str}{NC}')
+        print(f'{idx:>3}) {clean:<34}{CYAN}{pnl_str}{NC}')
     print(f'{BOLD}{"=" * 70}{NC}')
 
     print('\nWaehle Konfiguration(en) zum Anzeigen:')
@@ -352,7 +491,7 @@ def run_interactive_chart():
     if raw in ('alle', 'all'):
         selected = configs
     else:
-        indices  = []
+        indices = []
         for part in raw.replace(',', ' ').split():
             try:
                 indices.append(int(part) - 1)
@@ -407,7 +546,6 @@ def run_interactive_chart():
         raw = input('Telegram versenden? (j/n) [Standard: n]: ').strip().lower()
         send_tg = raw in ('j', 'y', 'ja', 'yes')
 
-    # Charts generieren
     generated = []
     for cfg in selected:
         market   = cfg.get('market', {})
@@ -434,3 +572,7 @@ def run_interactive_chart():
     print(f'\nINFO:')
     print(f'INFO: {GREEN}✅ Alle Charts generiert!{NC}')
     print(f'{GREEN}✅ Charts wurden generiert!{NC}')
+
+
+if __name__ == '__main__':
+    run_interactive_chart()

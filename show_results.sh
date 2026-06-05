@@ -34,12 +34,7 @@ fi
 
 # ── Modus 4: fragt intern selbst nach Datum/Kapital ─────────────────────────
 if [ "$MODE" == "4" ]; then
-    $PYTHON - <<PYEOF
-import sys
-sys.path.insert(0, '$SCRIPT_DIR/src')
-from zerobot.analysis.interactive_chart import run_interactive_chart
-run_interactive_chart()
-PYEOF
+    $PYTHON -c "import sys; sys.path.insert(0, '$SCRIPT_DIR/src'); from zerobot.analysis.interactive_chart import run_interactive_chart; run_interactive_chart()"
     deactivate
     exit 0
 fi
