@@ -58,11 +58,29 @@ zerobot/
     │   └── configs/               # Optimierte Configs pro Symbol/TF (in Git)
     │
     ├── analysis/
-    │   ├── optimizer.py           # Optuna Parameter-Suche
-    │   ├── backtester.py          # Historische Simulation
-    │   ├── portfolio_simulator.py # Portfolio-Simulation (gemeinsamer Kapital-Pool)
-    │   ├── portfolio_optimizer.py # Beste Strategie-Kombination finden
-    │   └── show_results.py        # Tabellen-Output (Einzel + Portfolio)
+    │   ├── optimizer.py               # Optuna Parameter-Suche
+    │   ├── backtester.py              # Historische Simulation (fee_override, return_trades)
+    │   ├── portfolio_simulator.py     # Portfolio-Simulation (gemeinsamer Kapital-Pool)
+    │   ├── portfolio_optimizer.py     # Beste Strategie-Kombination finden
+    │   ├── show_results.py            # Tabellen-Output (Einzel + Portfolio)
+    │   │
+    │   ├── walk_forward.py            # OOS-Test auf N Zeitfenstern
+    │   ├── fee_impact.py              # Gebühren-Sweep → Break-Even Fee
+    │   ├── monte_carlo.py             # 5000 Permutationen → Ruin-Risiko
+    │   ├── bootstrap_test.py          # Binomial-Signifikanztest (WR > Zufall?)
+    │   ├── param_sweep_walkforward.py # Walk-Forward für RR / ATR-SL / Trailing
+    │   ├── param_sensitivity.py       # Tornado: welcher Parameter macht das System fragil?
+    │   ├── multitf_analysis.py        # Concurrent Multi-TF Signals → bessere WR?
+    │   ├── param_stability.py         # Sind Optuna-Params über Zeit stabil?
+    │   ├── correlation.py             # Pearson-Korrelationsmatrix der Configs
+    │   ├── kelly_sizing.py            # Kelly% — optimaler Einsatz pro Config
+    │   ├── regime_analysis.py         # WR per TREND / RANGE / NEUTRAL / HIGH_VOL
+    │   ├── brick_pattern.py           # trend_min × reversal Brick-Gitter
+    │   ├── confluence.py              # Mehrfach-Signale → bessere WR?
+    │   ├── vol_filter.py              # min_vol_ratio Sweep
+    │   ├── time_analysis.py           # WR per Session (Asia / Europe / US)
+    │   ├── regime_adaptive.py         # TREND_RR × RANGE_RR Gitter
+    │   └── drawdown_duration.py       # DD-Perioden, Erholungsdauer-Statistik
     │
     └── utils/
         ├── exchange.py            # Bitget CCXT Wrapper
@@ -278,37 +296,67 @@ crontab -e
 
 ```
 =======================================================
-  ZeroBot — Renko Analysen
+  ZeroBot — Renko Wissenschaftliche Analysen
 =======================================================
 
-  ── Strategie-Analyse ───────────────────────────────
-   1) Einzel-Backtest            (alle Configs einzeln)
-   2) Manuelle Portfolio-Sim.    (eigene Auswahl)
-   3) Auto Portfolio-Optimierung (bestes Portfolio finden)
+  ── Priorität 1: Fundament ─────────────────────────
+   1) Walk-Forward Out-of-Sample Test
+   2) Slippage & Fee Impact
+   3) Monte Carlo Simulation
+   4) Bootstrap Signifikanztest
 
-  ── Renko-spezifische Analysen ──────────────────────
-   4) Brick-Größen-Sweep         (ATR-Multiplier 0.5–2.5 testen)
-   5) Trend-Längen-Analyse       (trend_min_bricks 2–6 vergleichen)
-   6) Reversal-Bricks-Analyse    (reversal_bricks 1–4 vergleichen)
-   7) Volumen-Filter Auswirkung  (mit / ohne vol_filter)
+  ── Priorität 2: Parameter-Optimierung ─────────────
+   5) RR-Ratio Walk-Forward
+   6) ATR-SL-Multiplier Walk-Forward
+   7) Trailing Callback Walk-Forward
+   8) Parameter Sensitivity (Tornado-Diagramm)
 
-  ── Risiko & Robustheit ─────────────────────────────
-   8) RR-Ratio Sweep             (1.0–4.0 vergleichen)
-   9) ATR-SL-Multiplier Sweep    (1.0–4.0 vergleichen)
-  10) Timeframe-Vergleich        (1h vs 4h vs 6h)
+  ── Priorität 3: Systemverbesserung ─────────────────
+   9) Multi-Timeframe Confirmation
+  10) Parameter-Stabilitäts-Analyse
+  11) Anti-Korrelations-Portfolio
+  12) Kelly Position Sizing
 
-   0) Alle Analysen nacheinander (Standard-Werte)
+  ── Priorität 4–6: Feintuning ───────────────────────
+  13) Regime Performance Analysis
+  14) Brick-Pattern-Kombinations-Analyse
+  15) Confluence Score
+  16) Volatilitäts-Filter Optimierung
+  17) Tageszeit-Analyse
+  18) Regime-adaptive Parameter
+  19) Drawdown Duration Analysis
+
+  ── Renko-Schnell-Sweeps ────────────────────────────
+  20) Brick-Größen-Sweep     (ATR-Multiplier 0.5–2.5)
+  21) Trend-Längen-Sweep     (trend_min_bricks 2–6)
+  22) Reversal-Bricks-Sweep  (reversal_bricks 1–4)
+  23) Volumen-Filter Vergleich
+  24) Timeframe-Vergleich    (1h vs 4h vs 6h)
+
+   0) Alle 1–19 Analysen nacheinander
 ```
 
 | Analyse | Was man lernt |
 |---|---|
-| **4) Brick-Größen-Sweep** | Kleine Bricks = mehr Trades, mehr Rauschen. Große Bricks = weniger Trades, sauberere Signale. Zeigt das optimale ATR-Vielfache für diesen Coin. |
-| **5) Trend-Längen-Analyse** | Wie viele Trend-Bricks vor dem Einstieg nötig sind. 2 = früher rein, riskanter. 6 = späte Bestätigung, weniger Fehlsignale. |
-| **6) Reversal-Bricks** | 1 Brick Reversal = sofortiger Einstieg. 3 Bricks = warten auf stärkere Umkehr. Trade-off: Einstieg vs. Sicherheit. |
-| **7) Volumen-Filter** | Ob der Volumen-Filter die Win-Rate verbessert oder zu viele gute Trades filtert. |
-| **8) RR-Ratio Sweep** | Zu hoch = Trailing Stop wird selten aktiviert, viele SL-Hits. Zu niedrig = kleiner Gewinn pro Win. |
-| **9) ATR-SL-Sweep** | Zu eng = vorzeitiger SL. Zu weit = großer Verlust pro Trade. |
-| **10) Timeframe-Vergleich** | Welcher Timeframe für diesen Coin die meisten statistisch stabilen Renko-Muster liefert. |
+| **1) Walk-Forward** | Testet die bestehende Config auf N gleich großen Zeitfenstern out-of-sample. Konsistenz-Score (Std der PnL) zeigt ob die Config generalisiert oder overfittet. |
+| **2) Slippage & Fee Impact** | PnL bei Gebührensätzen 0–0.20% pro Seite. Break-Even Fee zeigt wie viel Spielraum vor Unrentabilität besteht. Bitget Taker = 0.06%. |
+| **3) Monte Carlo** | 5000 zufällige Permutationen der echten Trade-Reihenfolge. 5.–95. Perzentil und Ruin-Risiko (Equity < 50%) zeigen das reale Risikoprofil. |
+| **4) Bootstrap Signifikanztest** | Binomial-Test: Ist die Win-Rate statistisch signifikant über 50% (Zufall)? p-Wert < 0.05 = echtes Signal. |
+| **5–7) Walk-Forward Sweeps** | Out-of-Sample-optimale Werte für RR-Ratio, ATR-SL-Multiplier und Trailing Callback. Verhindert Overfitting der Parameter. |
+| **8) Parameter Sensitivity** | Tornado-Diagramm: Variation jedes Parameters ±30%. Breiter Balken = sensitiv = Overfitting-Risiko. |
+| **9) Multi-TF Confirmation** | Wenn mehrere Timeframes desselben Coins gleichzeitig signalisieren — verbessert das die Win-Rate? |
+| **10) Parameter-Stabilität** | Sind die Optuna-optimierten Parameter über verschiedene Marktphasen konsistent optimal oder nur in der Optimierungsperiode? |
+| **11) Anti-Korrelation** | Wöchentliche PnL-Korrelationsmatrix aller Configs. Das am wenigsten korrelierte Paar = beste Diversifikation. |
+| **12) Kelly Position Sizing** | Mathematisch optimaler Einsatz (Half-Kelly). Negativer Kelly = langfristig nicht profitabel — wichtiger Warnhinweis. |
+| **13) Regime Performance** | WR per Marktphase: TREND / RANGE / NEUTRAL / HIGH_VOL (via ADX + ATR). Zeigt in welchen Phasen Renko funktioniert. |
+| **14) Brick-Pattern-Gitter** | 5×3-Tabelle: trend_min_bricks (2–6) × reversal_bricks (1–3). Zeigt welche Kombination die beste Performance liefert. |
+| **15) Confluence Score** | Wenn 2+ Configs gleichzeitig in dieselbe Richtung signalisieren — ist die Win-Rate besser als bei Einzelsignalen? |
+| **16) Volatilitäts-Filter** | min_vol_ratio Sweep (1.0–3.0). Zeigt Trade-off: strenger Filter = weniger Trades, höhere Qualität vs. mehr Rauschen. |
+| **17) Tageszeit-Analyse** | WR und Anzahl Trades per Session (Asia 01–09 UTC / Europe 09–17 / US 17–01). Top-Stunden und schwache Stunden. |
+| **18) Regime-adaptive Parameter** | TREND_RR × RANGE_RR Gitter: Ist ein niedrigerer RR in Trend-Phasen und höherer in Range-Phasen besser? |
+| **19) Drawdown Duration** | Alle Drawdown-Perioden: Start, Tiefpunkt, Erholung, Dauer in Tagen. Ø und 90. Perzentil der Erholungsdauer. |
+| **20–23) Schnell-Sweeps** | Direkte Parameter-Sweeps ohne Walk-Forward — schnelles Feedback zu Brick-Größe, Trend/Reversal-Bricks, Vol-Filter. |
+| **24) Timeframe-Vergleich** | Vergleicht 1h / 2h / 4h / 6h / 1d für einen Coin mit Standard-Parametern. |
 
 ---
 
