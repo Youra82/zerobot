@@ -276,28 +276,6 @@ while IFS=' ' read -r sym tf; do
 
 done <<< "$PAIRS"
 
-# ── Portfolio-Optimierung ─────────────────────────────────────────────────────
-echo ""
-echo "======================================================="
-echo "  Portfolio-Optimierung"
-echo "======================================================="
-echo ""
-
-$PYTHON "$SCRIPT_DIR/run_portfolio_optimizer.py" \
-    --capital    "$CAPITAL_INPUT" \
-    --max-dd     "$DD_INPUT" \
-    --start-date "$START_INPUT" \
-    --end-date   "$END_INPUT"
-
-# ── Ergebnisse ────────────────────────────────────────────────────────────────
-echo ""
-echo "======================================================="
-echo "  Ergebnisse"
-echo "======================================================="
-echo ""
-
-$PYTHON "$SCRIPT_DIR/src/zerobot/analysis/show_results.py" --mode 1
-
 echo ""
 echo "======================================================="
 echo -e "  ${GREEN}Pipeline abgeschlossen!${NC}"
