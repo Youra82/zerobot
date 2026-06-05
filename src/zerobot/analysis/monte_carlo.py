@@ -17,8 +17,10 @@ def load_configs():
                     result.append((fn, json.load(f)))
     return result
 
-def simulate_permutation(pnl_list, start_capital, rng):
-    perm = rng.permutation(pnl_list)
+def simulate_bootstrap(pnl_list, start_capital, rng):
+    # Resample WITH replacement — gives true distribution (not always same sum)
+    n    = len(pnl_list)
+    perm = rng.choice(pnl_list, size=n, replace=True)
     capital = start_capital
     peak    = start_capital
     max_dd  = 0.0
@@ -80,7 +82,9 @@ def create_chart(final_pcts, max_dds, symbol, n_sims, p5, p50, p95):
         ax.title.set_color('white')
 
     # Left: PnL distribution
-    ax1.hist(final_pcts, bins=50, color='#3b82f6', edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
+    pct_range = max(final_pcts) - min(final_pcts)
+    bins_pct  = min(50, max(1, int(pct_range * 2))) if pct_range > 0.01 else 1
+    ax1.hist(final_pcts, bins=bins_pct, color='#3b82f6', edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
     ax1.axvline(p5,  color='#ef4444', linestyle='--', linewidth=1.2, label=f'5. Pz: {p5:.1f}%')
     ax1.axvline(p50, color='#f59e0b', linestyle='--', linewidth=1.2, label=f'50. Pz: {p50:.1f}%')
     ax1.axvline(p95, color='#16a34a', linestyle='--', linewidth=1.2, label=f'95. Pz: {p95:.1f}%')
@@ -90,7 +94,9 @@ def create_chart(final_pcts, max_dds, symbol, n_sims, p5, p50, p95):
     legend1 = ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
 
     # Right: Max drawdown distribution
-    ax2.hist(max_dds, bins=50, color='#f59e0b', edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
+    dd_range = max(max_dds) - min(max_dds)
+    bins_dd  = min(50, max(1, int(dd_range * 2))) if dd_range > 0.01 else 1
+    ax2.hist(max_dds, bins=bins_dd, color='#f59e0b', edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
     median_dd = float(np.median(max_dds))
     ax2.axvline(median_dd, color='#ef4444', linestyle='--', linewidth=1.2,
                 label=f'Median DD: {median_dd:.1f}%')
@@ -161,7 +167,7 @@ def main():
         final_pcts = []
         max_dds    = []
         for _ in range(args.simulations):
-            fp, md = simulate_permutation(pnl_list, args.capital, rng)
+            fp, md = simulate_bootstrap(pnl_list, args.capital, rng)
             final_pcts.append(fp)
             max_dds.append(md * 100)
 
