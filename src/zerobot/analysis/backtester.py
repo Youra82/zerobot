@@ -20,22 +20,27 @@ secrets_cache = None
 
 
 def load_active_configs():
-    """Load configs filtered to active_strategies in settings.json.
-    Falls back to ALL configs if settings.json is missing or has no active_strategies."""
+    """Load only configs whose (symbol, timeframe) has active=true in settings.json.
+    Falls back to all configs only if settings.json cannot be read at all."""
     configs_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
 
-    # Read active strategies from settings.json
-    active_pairs = set()
+    # Build set of (symbol, timeframe) pairs where active is true
+    active_pairs = None  # None = settings.json unreadable → fall back
     try:
         with open(os.path.join(PROJECT_ROOT, 'settings.json')) as f:
             s = json.load(f)
-        for entry in s.get('live_trading_settings', {}).get('active_strategies', []):
+        entries = s.get('live_trading_settings', {}).get('active_strategies', [])
+        active_pairs = set()
+        for entry in entries:
+            # include only if active flag is missing (default true) or explicitly true
+            if not entry.get('active', True):
+                continue
             sym = entry.get('symbol', '').strip()
             tf  = entry.get('timeframe', '').strip()
             if sym and tf:
                 active_pairs.add((sym, tf))
     except Exception:
-        pass  # fall through to "all configs" behaviour
+        active_pairs = None  # fall back to all configs
 
     result = []
     if os.path.isdir(configs_dir):
@@ -46,7 +51,8 @@ def load_active_configs():
                         cfg = json.load(f)
                     sym = cfg.get('market', {}).get('symbol', '')
                     tf  = cfg.get('market', {}).get('timeframe', '')
-                    if not active_pairs or (sym, tf) in active_pairs:
+                    # active_pairs=None → fallback (all); active_pairs=set → filter
+                    if active_pairs is None or (sym, tf) in active_pairs:
                         result.append((fn, cfg))
                 except Exception:
                     pass
