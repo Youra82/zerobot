@@ -42,9 +42,12 @@ def analyze_drawdowns(trades, start_capital):
                 try:
                     ts_start = pd.to_datetime(timestamps[dd_start], utc=True)
                     ts_end   = pd.to_datetime(timestamps[i], utc=True)
-                    dur_days = (ts_end - ts_start).total_seconds() / 86400
+                    if pd.isna(ts_start) or pd.isna(ts_end):
+                        dur_days = float('nan')
+                    else:
+                        dur_days = (ts_end - ts_start).total_seconds() / 86400
                 except Exception:
-                    dur_days = 0
+                    dur_days = float('nan')
                 trough_idx = dd_start + int(np.argmin(equity[dd_start:i]))
                 dd_periods.append({
                     'start':   timestamps[dd_start],
@@ -65,9 +68,12 @@ def analyze_drawdowns(trades, start_capital):
         try:
             ts_start = pd.to_datetime(timestamps[dd_start], utc=True)
             ts_end   = pd.to_datetime(timestamps[-1], utc=True)
-            dur_days = (ts_end - ts_start).total_seconds() / 86400
+            if pd.isna(ts_start) or pd.isna(ts_end):
+                dur_days = float('nan')
+            else:
+                dur_days = (ts_end - ts_start).total_seconds() / 86400
         except Exception:
-            dur_days = 0
+            dur_days = float('nan')
         trough_idx = dd_start + int(np.argmin(equity[dd_start:]))
         dd_periods.append({
             'start':   timestamps[dd_start],
@@ -112,8 +118,14 @@ def create_chart(dd_periods, symbol, tf):
         print("  matplotlib nicht verfügbar — kein Chart.")
         return None
 
-    depths   = [dd['depth'] for dd in dd_periods]
-    durations = [dd['dur_days'] for dd in dd_periods]
+    all_depths    = np.array([dd['depth']    for dd in dd_periods], dtype=float)
+    all_durations = np.array([dd['dur_days'] for dd in dd_periods], dtype=float)
+    valid_mask = ~np.isnan(all_durations)
+    depths    = all_depths[valid_mask].tolist()
+    durations = all_durations[valid_mask].tolist()
+
+    if not durations:
+        return None
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
     fig.patch.set_facecolor('#0f172a')
@@ -128,28 +140,31 @@ def create_chart(dd_periods, symbol, tf):
         ax.yaxis.label.set_color('#94a3b8')
         ax.title.set_color('white')
 
-    # Left: scatter DD depth vs duration
+    # Left: scatter DD depth vs duration (only closed/known periods)
     ax1.scatter(depths, durations, color='#ef4444', alpha=0.7, edgecolors='#334155',
                 linewidths=0.5, s=50)
-    if len(depths) >= 2:
-        z = np.polyfit(depths, durations, 1)
-        p = np.poly1d(z)
-        x_line = np.linspace(min(depths), max(depths), 50)
-        ax1.plot(x_line, p(x_line), color='#f59e0b', linestyle='--',
-                 linewidth=1.0, alpha=0.7, label='Trend')
-        ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
+    if len(depths) >= 3:
+        try:
+            z = np.polyfit(depths, durations, 1)
+            p = np.poly1d(z)
+            x_line = np.linspace(min(depths), max(depths), 50)
+            ax1.plot(x_line, p(x_line), color='#f59e0b', linestyle='--',
+                     linewidth=1.0, alpha=0.7, label='Trend')
+            ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
+        except Exception:
+            pass
     ax1.set_xlabel('DD Tiefe %', color='#94a3b8')
     ax1.set_ylabel('Dauer (Tage)', color='#94a3b8')
-    ax1.set_title('DD Tiefe vs Dauer', color='white', fontsize=11)
+    ax1.set_title(f'DD Tiefe vs Dauer ({len(durations)} abgeschlossen)', color='white', fontsize=11)
 
     # Right: histogram of recovery durations
-    if durations:
-        ax2.hist(durations, bins=min(20, len(durations)), color='#f59e0b',
-                 edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
-        median_dur = float(np.median(durations))
-        ax2.axvline(median_dur, color='#ef4444', linestyle='--', linewidth=1.2,
-                    label=f'Median: {median_dur:.1f}d')
-        ax2.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
+    bins = max(1, min(20, len(durations)))
+    ax2.hist(durations, bins=bins, color='#f59e0b',
+             edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
+    median_dur = float(np.median(durations))
+    ax2.axvline(median_dur, color='#ef4444', linestyle='--', linewidth=1.2,
+                label=f'Median: {median_dur:.1f}d')
+    ax2.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
     ax2.set_xlabel('Dauer (Tage)', color='#94a3b8')
     ax2.set_ylabel('Häufigkeit', color='#94a3b8')
     ax2.set_title('Drawdown-Dauer Verteilung', color='white', fontsize=11)
@@ -222,7 +237,8 @@ def main():
             start_str  = str(dd['start'])[:10] if dd['start'] else '—'
             bottom_str = str(dd['bottom'])[:10] if dd['bottom'] else '—'
             end_str    = str(dd['end'])[:10] if dd['end'] else 'offen'
-            print(f"  {i:<4} {start_str:<12} {bottom_str:<12} {end_str:<12} {dd['depth']:>7.1f}% {dd['dur_days']:>9.1f}")
+            dur_str    = f"{dd['dur_days']:>9.1f}" if not (dd['dur_days'] != dd['dur_days']) else '        —'
+            print(f"  {i:<4} {start_str:<12} {bottom_str:<12} {end_str:<12} {dd['depth']:>7.1f}% {dur_str}")
 
         if len(dd_periods) > 10:
             print(f"  ... und {len(dd_periods)-10} weitere Drawdown-Perioden")
@@ -230,10 +246,18 @@ def main():
         durations = [dd['dur_days'] for dd in dd_periods]
         depths    = [dd['depth']    for dd in dd_periods]
 
-        print(f"\n  Statistik ({len(dd_periods)} Drawdown-Perioden):")
-        print(f"    Avg Dauer:       {np.mean(durations):>7.1f} Tage")
-        print(f"    Max Dauer:       {np.max(durations):>7.1f} Tage")
-        print(f"    90. Pz Dauer:    {np.percentile(durations, 90):>7.1f} Tage")
+        dur_arr = np.array(durations, dtype=float)
+        valid_durs = dur_arr[~np.isnan(dur_arr)]
+        n_known = len(valid_durs)
+        n_open  = len(durations) - n_known
+
+        print(f"\n  Statistik ({len(dd_periods)} Drawdown-Perioden, {n_open} offen/unbekannt):")
+        if n_known > 0:
+            print(f"    Avg Dauer:       {np.mean(valid_durs):>7.1f} Tage  (aus {n_known} abgeschlossenen)")
+            print(f"    Max Dauer:       {np.max(valid_durs):>7.1f} Tage")
+            print(f"    90. Pz Dauer:    {np.percentile(valid_durs, 90):>7.1f} Tage")
+        else:
+            print(f"    Dauer-Statistik: —  (alle Perioden offen oder Startdatum unbekannt)")
         print(f"    Avg Tiefe:       {np.mean(depths):>7.1f}%")
         print(f"    Max Tiefe:       {np.max(depths):>7.1f}%")
 
