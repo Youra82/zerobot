@@ -19,6 +19,40 @@ from zerobot.utils.timeframe_utils import determine_htf
 secrets_cache = None
 
 
+def load_active_configs():
+    """Load configs filtered to active_strategies in settings.json.
+    Falls back to ALL configs if settings.json is missing or has no active_strategies."""
+    configs_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
+
+    # Read active strategies from settings.json
+    active_pairs = set()
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'settings.json')) as f:
+            s = json.load(f)
+        for entry in s.get('live_trading_settings', {}).get('active_strategies', []):
+            sym = entry.get('symbol', '').strip()
+            tf  = entry.get('timeframe', '').strip()
+            if sym and tf:
+                active_pairs.add((sym, tf))
+    except Exception:
+        pass  # fall through to "all configs" behaviour
+
+    result = []
+    if os.path.isdir(configs_dir):
+        for fn in sorted(os.listdir(configs_dir)):
+            if fn.startswith('config_') and fn.endswith('.json'):
+                try:
+                    with open(os.path.join(configs_dir, fn)) as f:
+                        cfg = json.load(f)
+                    sym = cfg.get('market', {}).get('symbol', '')
+                    tf  = cfg.get('market', {}).get('timeframe', '')
+                    if not active_pairs or (sym, tf) in active_pairs:
+                        result.append((fn, cfg))
+                except Exception:
+                    pass
+    return result
+
+
 class Bias:
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
