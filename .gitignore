@@ -1,0 +1,14 @@
+secret.json
+secret.json.bak
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+artifacts/db/*.db
+artifacts/results/last_optimizer_run.json
+data/cache/
+logs/
+*.log
+.optimization_in_progress
+.last_optimization_run
