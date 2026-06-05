@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZeroBot Update-Skript
+# update.sh — ZeroBot aktualisieren
 cp secret.json secret.json.bak
 git fetch origin
 git reset --hard origin/main
@@ -8,4 +8,6 @@ rm secret.json.bak
 find . -type f -name "*.pyc" -delete
 find . -type d -name "__pycache__" -delete
 chmod +x *.sh
+# Pakete aktualisieren
+.venv/bin/pip install -r requirements.txt --quiet
 echo "ZeroBot aktualisiert."

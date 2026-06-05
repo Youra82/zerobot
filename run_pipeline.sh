@@ -19,7 +19,14 @@ fi
 source "$VENV_PATH"
 echo -e "${GREEN}✔ Virtuelle Umgebung wurde erfolgreich aktiviert.${NC}"
 
-# ── Empfohlene Renko Brick-Größen (ATR-Multiplier) pro Coin ─────────────────
+# ── Pakete prüfen ─────────────────────────────────────────────────────────────
+$PYTHON -c "import ta" 2>/dev/null || {
+    echo -e "${YELLOW}⚠ Fehlende Pakete — installiere nach requirements.txt...${NC}"
+    $PYTHON -m pip install -r "$SCRIPT_DIR/requirements.txt" --quiet
+    echo -e "${GREEN}✔ Pakete installiert.${NC}"
+}
+
+# ── Empfohlene Brick-Größen (ATR-Multiplier) pro Coin ────────────────────────
 declare -A BRICK_DEFAULTS
 BRICK_DEFAULTS["BTC"]="0.8"
 BRICK_DEFAULTS["ETH"]="0.9"
@@ -41,6 +48,7 @@ echo ""
 
 # ── Alte Configs löschen? ────────────────────────────────────────────────────
 CONFIGS_DIR="$SCRIPT_DIR/src/zerobot/strategy/configs"
+mkdir -p "$CONFIGS_DIR"
 if ls "$CONFIGS_DIR"/config_*.json &>/dev/null 2>&1; then
     read -p "Möchtest du alle alten, generierten Configs vor dem Start löschen?
 Dies wird für einen kompletten Neustart empfohlen. (j/n) [Standard: n]: " RESET_CONFIGS
@@ -59,20 +67,16 @@ fi
 echo ""
 read -p "Handelspaar(e) eingeben (ohne /USDT, z.B. BTC ETH DOGE) [leer=auto aus settings.json]: " COINS_INPUT
 read -p "Zeitfenster eingeben (z.B. 4h 1h 6h) [leer=auto aus settings.json]: " TF_INPUT
-
 COINS_INPUT="${COINS_INPUT//[$'\r\n']/}"
 TF_INPUT="${TF_INPUT//[$'\r\n']/}"
 
 export ZB_COINS="$COINS_INPUT"
 export ZB_TFS="$TF_INPUT"
 
-# Paarliste aufbauen
 PAIRS=$($PYTHON - <<'PYEOF'
 import os, json
-
 coins_raw = os.environ.get('ZB_COINS', '').strip()
 tfs_raw   = os.environ.get('ZB_TFS',   '').strip()
-
 try:
     with open('settings.json') as f:
         s = json.load(f)
@@ -89,7 +93,6 @@ def to_symbol(c):
 
 coins = [to_symbol(c) for c in coins_raw.split()] if coins_raw else auto_coins
 tfs   = [t.strip() for t in tfs_raw.split()]       if tfs_raw   else auto_tfs
-
 for sym in coins:
     for tf in tfs:
         print(f"{sym} {tf}")
@@ -102,10 +105,10 @@ echo "--- Empfehlung: Optimaler Rückblick-Zeitraum ---"
 printf "+-------------+--------------------------------+\n"
 printf "| %-11s | %-30s |\n" "Zeitfenster" "Empfohlener Rückblick (Tage)"
 printf "+-------------+--------------------------------+\n"
-printf "| %-11s | %-30s |\n" "5m, 15m"     "60 - 180 Tage"
-printf "| %-11s | %-30s |\n" "30m, 1h"     "180 - 365 Tage"
-printf "| %-11s | %-30s |\n" "2h, 4h"      "550 - 730 Tage"
-printf "| %-11s | %-30s |\n" "6h, 1d"      "1095 - 1825 Tage"
+printf "| %-11s | %-30s |\n" "5m, 15m"  "60 - 180 Tage"
+printf "| %-11s | %-30s |\n" "30m, 1h"  "180 - 365 Tage"
+printf "| %-11s | %-30s |\n" "2h, 4h"   "550 - 730 Tage"
+printf "| %-11s | %-30s |\n" "6h, 1d"   "1095 - 1825 Tage"
 printf "+-------------+--------------------------------+\n"
 echo ""
 
@@ -115,35 +118,24 @@ read -p "Enddatum (JJJJ-MM-TT) [Standard: Heute]: " END_INPUT
 END_INPUT="${END_INPUT//[$'\r\n ']/}"
 END_INPUT="${END_INPUT:-$(date +%Y-%m-%d)}"
 
-# Automatisches Startdatum (größten Lookback der gewählten Timeframes)
 if [[ -z "$START_INPUT" || "$START_INPUT" == "a" ]]; then
     START_INPUT=$($PYTHON - <<PYEOF2
-import sys
 from datetime import datetime, timedelta
-
-tfs_raw = """$TF_INPUT""".strip()
-pairs   = """$PAIRS"""
-
-lookback_map = {
-    '5m': 120, '15m': 120, '30m': 365, '1h': 365,
-    '2h': 730, '4h': 730, '6h': 1095, '1d': 1825,
-}
-
+pairs = """$PAIRS"""
+lookback_map = {'5m':120,'15m':120,'30m':365,'1h':365,'2h':730,'4h':730,'6h':1095,'1d':1825}
 tfs = set()
 for line in pairs.strip().split('\n'):
     parts = line.strip().split()
     if len(parts) == 2:
         tfs.add(parts[1])
-
 days = max((lookback_map.get(tf, 730) for tf in tfs), default=730)
-start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-print(start)
+print((datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d'))
 PYEOF2
     )
-    # Zeige Info welches Datum gewählt wurde
-    echo ""
     while IFS=' ' read -r sym tf; do
-        echo -e "${CYAN}INFO: Automatisches Startdatum für $tf gesetzt auf: $START_INPUT${NC}"
+        echo -e "${CYAN}INFO: Automatisches Startdatum für $tf ($(
+            case $tf in 4h) echo "730 Tage";; 6h) echo "1095 Tage";; 1h) echo "365 Tage";; *) echo "auto";; esac
+        ) Rückblick) gesetzt auf: $START_INPUT${NC}"
         break
     done <<< "$PAIRS"
 fi
@@ -167,15 +159,11 @@ if ! [[ "$TRIALS_INPUT" =~ ^[0-9]+$ ]]; then TRIALS_INPUT=200; fi
 
 echo ""
 echo "Wähle einen Optimierungs-Modus:"
-echo "  1) Strenger Modus   (Profitabel + WR >= 45% + MaxDD <= Limit)"
+echo "  1) Strenger Modus   (Profitabel + WR >= Min. Win-Rate + MaxDD <= Limit)"
 echo "  2) Best-Profit-Modus (Nur MaxDD-Limit, maximiert PnL)"
 read -p "Auswahl (1-2) [Standard: 1]: " MODE_INPUT
 MODE_INPUT="${MODE_INPUT//[$'\r\n ']/}"
-if [[ "$MODE_INPUT" == "2" ]]; then
-    OPTIM_MODE="best_profit"
-else
-    OPTIM_MODE="strict"
-fi
+if [[ "$MODE_INPUT" == "2" ]]; then OPTIM_MODE="best_profit"; else OPTIM_MODE="strict"; fi
 
 read -p "Max Drawdown % [Standard: 30]: " DD_INPUT
 DD_INPUT="${DD_INPUT//[$'\r\n ']/}"
@@ -185,14 +173,20 @@ read -p "Min. Win-Rate % [Standard: 45]: " WR_INPUT
 WR_INPUT="${WR_INPUT//[$'\r\n ']/}"
 if ! [[ "$WR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WR_INPUT=45; fi
 
-# ── Renko Brick-Größen abfragen ───────────────────────────────────────────────
+# ── Renko Strategie-Parameter (optional fixieren) ─────────────────────────────
 echo ""
-echo "--- Renko Brick-Größen (ATR-Multiplier) ---"
+echo "--- Renko Strategie-Parameter ---"
 echo ""
-echo "  Leer lassen → Optuna optimiert frei (0.5–3.0)"
-echo "  Zahl eingeben → Multiplier wird fixiert (nicht von Optuna verändert)"
+echo "  Was Optuna optimiert wenn du leer lässt:"
+printf "  %-22s %s\n" "atr_multiplier"   "Brick-Größe = ATR × X          (0.5–3.0)"
+printf "  %-22s %s\n" "trend_min_bricks" "Mindest-Bricks für Trend       (2–6)"
+printf "  %-22s %s\n" "reversal_bricks"  "Bricks für Reversal-Signal     (1–3)"
+printf "  %-22s %s\n" "vol_filter"       "Volumen-Bestätigung ja/nein    (auto)"
+echo ""
+echo "  Zahl/Wert eingeben → wird fixiert | leer → Optuna optimiert frei"
 echo ""
 
+# ATR-Multiplier pro Pair
 declare -A PAIR_ATR_OVERRIDES
 while IFS=' ' read -r sym tf; do
     COIN=$(echo "$sym" | cut -d'/' -f1)
@@ -202,10 +196,48 @@ while IFS=' ' read -r sym tf; do
     PAIR_KEY="${sym}_${tf}"
     if [[ "$ATR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
         PAIR_ATR_OVERRIDES["$PAIR_KEY"]="$ATR_INPUT"
+        echo -e "    ${GREEN}→ Fixiert auf: $ATR_INPUT${NC}"
     else
         PAIR_ATR_OVERRIDES["$PAIR_KEY"]=""
+        echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
     fi
 done <<< "$PAIRS"
+
+echo ""
+
+# Trend-Min-Bricks (global für alle Pairs)
+read -p "  trend_min_bricks — Mindest-Trend-Bricks [2-6, leer=Optuna frei]: " TREND_INPUT
+TREND_INPUT="${TREND_INPUT//[$'\r\n ']/}"
+TREND_ARG=""
+if [[ "$TREND_INPUT" =~ ^[2-6]$ ]]; then
+    TREND_ARG="$TREND_INPUT"
+    echo -e "    ${GREEN}→ Fixiert auf: $TREND_INPUT${NC}"
+else
+    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
+fi
+
+read -p "  reversal_bricks  — Reversal-Bestätigung [1-3, leer=Optuna frei]: " REVERSAL_INPUT
+REVERSAL_INPUT="${REVERSAL_INPUT//[$'\r\n ']/}"
+REVERSAL_ARG=""
+if [[ "$REVERSAL_INPUT" =~ ^[1-3]$ ]]; then
+    REVERSAL_ARG="$REVERSAL_INPUT"
+    echo -e "    ${GREEN}→ Fixiert auf: $REVERSAL_INPUT${NC}"
+else
+    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
+fi
+
+read -p "  vol_filter       — Volumen-Filter [j/n, leer=Optuna frei]: " VOL_INPUT
+VOL_INPUT="${VOL_INPUT//[$'\r\n ']/}"
+VOL_ARG=""
+if [[ "$VOL_INPUT" == "j" || "$VOL_INPUT" == "J" || "$VOL_INPUT" == "y" || "$VOL_INPUT" == "Y" ]]; then
+    VOL_ARG="true"
+    echo -e "    ${GREEN}→ Fixiert auf: aktiviert${NC}"
+elif [[ "$VOL_INPUT" == "n" || "$VOL_INPUT" == "N" ]]; then
+    VOL_ARG="false"
+    echo -e "    ${GREEN}→ Fixiert auf: deaktiviert${NC}"
+else
+    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
+fi
 
 # ── Optimizer pro Pair ────────────────────────────────────────────────────────
 OPTIMIZER="$SCRIPT_DIR/src/zerobot/analysis/optimizer.py"
@@ -217,22 +249,20 @@ while IFS=' ' read -r sym tf; do
 
     echo ""
     echo "======================================================="
-    if [ -n "$ATR_OVERRIDE" ]; then
-        echo "  Bearbeite Pipeline für: $COIN ($tf)"
-        echo "  Brick-Größe: ATR × $ATR_OVERRIDE (fixiert)"
-    else
-        echo "  Bearbeite Pipeline für: $COIN ($tf)"
-        echo "  Brick-Größe: Optuna optimiert frei"
-    fi
+    echo "  Bearbeite Pipeline für: $COIN ($tf)"
     echo "  Datenzeitraum: $START_INPUT bis $END_INPUT"
     echo "======================================================="
     echo ""
 
-    ATR_ARG=""
-    [ -n "$ATR_OVERRIDE" ] && ATR_ARG="--fixed-atr-multiplier $ATR_OVERRIDE"
+    # Baue optionale Args
+    EXTRA_ARGS=""
+    [ -n "$ATR_OVERRIDE" ]  && EXTRA_ARGS="$EXTRA_ARGS --fixed-atr-multiplier $ATR_OVERRIDE"
+    [ -n "$TREND_ARG" ]     && EXTRA_ARGS="$EXTRA_ARGS --fixed-trend-min-bricks $TREND_ARG"
+    [ -n "$REVERSAL_ARG" ]  && EXTRA_ARGS="$EXTRA_ARGS --fixed-reversal-bricks $REVERSAL_ARG"
+    [ -n "$VOL_ARG" ]       && EXTRA_ARGS="$EXTRA_ARGS --fixed-vol-filter $VOL_ARG"
 
     $PYTHON "$OPTIMIZER" \
-        --pairs "${sym}|${tf}" \
+        --pairs         "${sym}|${tf}" \
         --start_date    "$START_INPUT" \
         --end_date      "$END_INPUT" \
         --trials        "$TRIALS_INPUT" \
@@ -242,7 +272,7 @@ while IFS=' ' read -r sym tf; do
         --min_win_rate  "$WR_INPUT" \
         --min_pnl 0 \
         --mode "$OPTIM_MODE" \
-        $ATR_ARG
+        $EXTRA_ARGS
 
 done <<< "$PAIRS"
 

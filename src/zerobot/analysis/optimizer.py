@@ -31,6 +31,9 @@ MIN_PNL_CONSTRAINT      = 0.0
 START_CAPITAL           = 100
 OPTIM_MODE              = "strict"
 FIXED_ATR_MULTIPLIER    = None   # wenn gesetzt → Optuna überspringt diese Variable
+FIXED_TREND_MIN_BRICKS  = None
+FIXED_REVERSAL_BRICKS   = None
+FIXED_VOL_FILTER        = None
 
 RESULTS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_optimizer_run.json')
 
@@ -40,15 +43,16 @@ def create_safe_filename(symbol, timeframe):
 
 
 def objective(trial):
-    atr_mult = FIXED_ATR_MULTIPLIER if FIXED_ATR_MULTIPLIER is not None \
-               else trial.suggest_float('atr_multiplier', 0.5, 3.0)
+    atr_mult    = FIXED_ATR_MULTIPLIER   if FIXED_ATR_MULTIPLIER   is not None else trial.suggest_float('atr_multiplier', 0.5, 3.0)
+    trend_min   = FIXED_TREND_MIN_BRICKS if FIXED_TREND_MIN_BRICKS is not None else trial.suggest_int('trend_min_bricks', 2, 6)
+    reversal    = FIXED_REVERSAL_BRICKS  if FIXED_REVERSAL_BRICKS  is not None else trial.suggest_int('reversal_bricks', 1, 3)
+    vol_filter  = FIXED_VOL_FILTER       if FIXED_VOL_FILTER       is not None else trial.suggest_categorical('vol_filter_enabled', [True, False])
     strategy_params = {
-        # Renko-spezifische Parameter
         'atr_multiplier':     atr_mult,
-        'trend_min_bricks':   trial.suggest_int('trend_min_bricks',   2,   6),
-        'reversal_bricks':    trial.suggest_int('reversal_bricks',    1,   3),
-        'vol_filter_enabled': trial.suggest_categorical('vol_filter_enabled', [True, False]),
-        'min_vol_ratio':      trial.suggest_float('min_vol_ratio',    1.0, 2.5),
+        'trend_min_bricks':   trend_min,
+        'reversal_bricks':    reversal,
+        'vol_filter_enabled': vol_filter,
+        'min_vol_ratio':      trial.suggest_float('min_vol_ratio', 1.0, 2.5),
         'symbol':    CURRENT_SYMBOL,
         'timeframe': CURRENT_TIMEFRAME,
         'htf':       CURRENT_HTF,
@@ -83,7 +87,7 @@ def objective(trial):
 def main():
     global HISTORICAL_DATA, CURRENT_SYMBOL, CURRENT_TIMEFRAME, CURRENT_HTF
     global MAX_DRAWDOWN_CONSTRAINT, MIN_WIN_RATE_CONSTRAINT, MIN_PNL_CONSTRAINT, START_CAPITAL, OPTIM_MODE
-    global FIXED_ATR_MULTIPLIER
+    global FIXED_ATR_MULTIPLIER, FIXED_TREND_MIN_BRICKS, FIXED_REVERSAL_BRICKS, FIXED_VOL_FILTER
 
     parser = argparse.ArgumentParser(description="Parameter-Optimierung für ZeroBot (Renko)")
     parser.add_argument('--symbols',      type=str, default="")
@@ -98,8 +102,11 @@ def main():
     parser.add_argument('--trials',       required=True, type=int)
     parser.add_argument('--min_pnl',      required=True, type=float)
     parser.add_argument('--mode',         required=True, type=str)
-    parser.add_argument('--fixed-atr-multiplier', type=float, default=None,
-                        help='Fixer ATR-Multiplier (Renko Brick-Größe). Wird nicht optimiert.')
+    parser.add_argument('--fixed-atr-multiplier',    type=float,  default=None)
+    parser.add_argument('--fixed-trend-min-bricks',  type=int,    default=None)
+    parser.add_argument('--fixed-reversal-bricks',   type=int,    default=None)
+    parser.add_argument('--fixed-vol-filter',        type=str,    default=None,
+                        help='"true" oder "false"')
     args = parser.parse_args()
 
     MAX_DRAWDOWN_CONSTRAINT = args.max_drawdown / 100.0
@@ -109,8 +116,18 @@ def main():
     N_TRIALS                = args.trials
     OPTIM_MODE              = args.mode
     FIXED_ATR_MULTIPLIER    = args.fixed_atr_multiplier
-    if FIXED_ATR_MULTIPLIER is not None:
-        print(f"  [INFO] Fixer ATR-Multiplier: {FIXED_ATR_MULTIPLIER} (wird nicht von Optuna optimiert)")
+    FIXED_TREND_MIN_BRICKS  = args.fixed_trend_min_bricks
+    FIXED_REVERSAL_BRICKS   = args.fixed_reversal_bricks
+    FIXED_VOL_FILTER        = (args.fixed_vol_filter.lower() == 'true') \
+                              if args.fixed_vol_filter is not None else None
+
+    fixed_info = []
+    if FIXED_ATR_MULTIPLIER   is not None: fixed_info.append(f"atr_multiplier={FIXED_ATR_MULTIPLIER}")
+    if FIXED_TREND_MIN_BRICKS is not None: fixed_info.append(f"trend_min_bricks={FIXED_TREND_MIN_BRICKS}")
+    if FIXED_REVERSAL_BRICKS  is not None: fixed_info.append(f"reversal_bricks={FIXED_REVERSAL_BRICKS}")
+    if FIXED_VOL_FILTER       is not None: fixed_info.append(f"vol_filter={FIXED_VOL_FILTER}")
+    if fixed_info:
+        print(f"  [INFO] Fixierte Parameter: {', '.join(fixed_info)}")
 
     if args.pairs.strip():
         TASKS = []
