@@ -25,11 +25,98 @@ def ascii_bar(value, scale=1.0, width=20):
     filled = min(filled, width)
     return '█' * filled
 
+
+def get_telegram_credentials():
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
+            s = json.load(f)
+        tg = s.get('telegram', {})
+        return tg.get('bot_token', ''), tg.get('chat_id', '')
+    except Exception:
+        return None, None
+
+
+def send_telegram_photo(token, chat_id, path, caption=''):
+    try:
+        import requests
+        with open(path, 'rb') as f:
+            requests.post(f'https://api.telegram.org/bot{token}/sendPhoto',
+                          data={'chat_id': chat_id, 'caption': caption},
+                          files={'photo': f}, timeout=30)
+    except Exception as e:
+        print(f"  Telegram Fehler: {e}")
+
+
+def create_chart(sorted_params, sensitivity, detail_rows, symbol):
+    """Tornado chart: horizontal bars showing PnL range per parameter."""
+    if not sorted_params:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  matplotlib nicht verfügbar — kein Chart.")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(sorted_params) * 1.1 + 1)))
+    fig.patch.set_facecolor('#0f172a')
+    ax.set_facecolor('#1e293b')
+    ax.tick_params(colors='#94a3b8')
+    for spine in ax.spines.values():
+        spine.set_color('#334155')
+    ax.grid(True, alpha=0.15, color='#475569')
+    ax.xaxis.label.set_color('#94a3b8')
+    ax.yaxis.label.set_color('#94a3b8')
+    ax.title.set_color('white')
+
+    y_pos = range(len(sorted_params))
+    for i, param in enumerate(sorted_params):
+        rows = detail_rows[param]
+        pnl_vals = [r[2] for r in rows]
+        min_pnl = min(pnl_vals)
+        max_pnl = max(pnl_vals)
+        # Draw range bar
+        ax.barh(i, max_pnl - min_pnl, left=min_pnl,
+                color='#3b82f6', alpha=0.6, height=0.5, edgecolor='#334155')
+        # Baseline dot
+        baseline = next((r[2] for r in rows if abs(r[0]) < 1e-9), None)
+        if baseline is not None:
+            ax.plot(baseline, i, 'o', color='#f59e0b', markersize=6, zorder=5)
+        ax.text(max_pnl + 0.5, i, f'{sensitivity[param]:.1f}%',
+                va='center', color='#94a3b8', fontsize=8)
+
+    ax.axvline(0, color='#94a3b8', linestyle='--', linewidth=0.8, alpha=0.7)
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(sorted_params, color='#94a3b8', fontsize=9)
+    ax.set_xlabel('PnL%', color='#94a3b8')
+    ax.set_title(f'Parameter Sensitivity | {symbol}', color='white', fontsize=12)
+
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='#f59e0b',
+               markersize=8, label='Baseline'),
+        plt.Rectangle((0, 0), 1, 1, fc='#3b82f6', alpha=0.6, label='Range (-30% bis +30%)')
+    ]
+    legend = ax.legend(handles=legend_elements, facecolor='#1e293b',
+                       labelcolor='white', fontsize=8)
+    plt.tight_layout()
+
+    path = '/tmp/zerobot_param_sensitivity.png'
+    plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    docs_path = os.path.join(PROJECT_ROOT, 'docs', 'param_sensitivity_latest.png')
+    os.makedirs(os.path.dirname(docs_path), exist_ok=True)
+    plt.savefig(docs_path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    plt.close()
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description='Parameter Sensitivity (Tornado)')
     parser.add_argument('--start-date', default='2023-01-01')
     parser.add_argument('--end-date', default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--capital', type=float, default=100)
+    parser.add_argument('--no-telegram', action='store_true')
     args = parser.parse_args()
 
     configs = load_configs()
@@ -110,6 +197,15 @@ def main():
 
     print(f"\n  * = Baseline-Wert")
     print("\n" + "=" * 75)
+
+    chart_path = create_chart(sorted_params, sensitivity, detail_rows, symbol)
+    if chart_path and not args.no_telegram:
+        token, chat_id = get_telegram_credentials()
+        if token and chat_id:
+            top_param = sorted_params[0] if sorted_params else ''
+            caption = (f"ZeroBot Parameter Sensitivity | {symbol} ({timeframe}) | "
+                       f"Sensibelster: {top_param}")
+            send_telegram_photo(token, chat_id, chart_path, caption)
 
 if __name__ == '__main__':
     main()

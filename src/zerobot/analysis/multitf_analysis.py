@@ -17,12 +17,100 @@ def load_configs():
                     result.append((fn, json.load(f)))
     return result
 
+
+def get_telegram_credentials():
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
+            s = json.load(f)
+        tg = s.get('telegram', {})
+        return tg.get('bot_token', ''), tg.get('chat_id', '')
+    except Exception:
+        return None, None
+
+
+def send_telegram_photo(token, chat_id, path, caption=''):
+    try:
+        import requests
+        with open(path, 'rb') as f:
+            requests.post(f'https://api.telegram.org/bot{token}/sendPhoto',
+                          data={'chat_id': chat_id, 'caption': caption},
+                          files={'photo': f}, timeout=30)
+    except Exception as e:
+        print(f"  Telegram Fehler: {e}")
+
+
+def create_chart(chart_data):
+    """chart_data: list of (symbol, c_wr, c_n, s_wr, s_n)"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  matplotlib nicht verfügbar — kein Chart.")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.patch.set_facecolor('#0f172a')
+    ax.set_facecolor('#1e293b')
+    ax.tick_params(colors='#94a3b8')
+    for spine in ax.spines.values():
+        spine.set_color('#334155')
+    ax.grid(True, alpha=0.15, color='#475569')
+    ax.xaxis.label.set_color('#94a3b8')
+    ax.yaxis.label.set_color('#94a3b8')
+    ax.title.set_color('white')
+
+    if not chart_data:
+        ax.text(0.5, 0.5, 'Keine Concurrent Signals gefunden',
+                color='#94a3b8', ha='center', va='center',
+                transform=ax.transAxes, fontsize=12)
+        ax.set_title('Multi-TF Confirmation', color='white', fontsize=12)
+    else:
+        symbols = [d[0] for d in chart_data]
+        c_wrs   = [d[1] for d in chart_data]
+        s_wrs   = [d[3] for d in chart_data]
+        c_ns    = [d[2] for d in chart_data]
+        s_ns    = [d[4] for d in chart_data]
+
+        x = np.arange(len(symbols))
+        width = 0.35
+        bars1 = ax.bar(x - width/2, c_wrs, width, color='#16a34a', label='Multi-TF (concurrent)',
+                       edgecolor='#334155', linewidth=0.5)
+        bars2 = ax.bar(x + width/2, s_wrs, width, color='#3b82f6', label='Solo (einzelner TF)',
+                       edgecolor='#334155', linewidth=0.5)
+
+        for bar, n in zip(bars1, c_ns):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                    f'n={n}', ha='center', va='bottom', color='white', fontsize=7)
+        for bar, n in zip(bars2, s_ns):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                    f'n={n}', ha='center', va='bottom', color='white', fontsize=7)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(symbols, color='#94a3b8')
+        ax.set_ylabel('Win-Rate %', color='#94a3b8')
+        ax.axhline(50, color='#f59e0b', linestyle='--', linewidth=0.8, alpha=0.7, label='50% WR')
+        legend = ax.legend(facecolor='#1e293b', labelcolor='white', fontsize=9)
+
+    ax.set_title('Multi-TF Confirmation', color='white', fontsize=12)
+    plt.tight_layout()
+
+    path = '/tmp/zerobot_multitf.png'
+    plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    docs_path = os.path.join(PROJECT_ROOT, 'docs', 'multitf_latest.png')
+    os.makedirs(os.path.dirname(docs_path), exist_ok=True)
+    plt.savefig(docs_path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    plt.close()
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description='Multi-Timeframe Confirmation Analysis')
     parser.add_argument('--start-date', default='2023-01-01')
     parser.add_argument('--end-date', default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--capital', type=float, default=100)
     parser.add_argument('--window-hours', type=float, default=4)
+    parser.add_argument('--no-telegram', action='store_true')
     args = parser.parse_args()
 
     configs = load_configs()
@@ -68,12 +156,18 @@ def main():
 
     if not all_trades_by_symbol:
         print("  Keine Trade-Daten verfuegbar.")
+        chart_path = create_chart([])
+        if chart_path and not args.no_telegram:
+            token, chat_id = get_telegram_credentials()
+            if token and chat_id:
+                send_telegram_photo(token, chat_id, chart_path, "ZeroBot Multi-TF | Keine Daten")
         return
 
     window_td = timedelta(hours=args.window_hours)
+    chart_data = []
 
-    for symbol, tf_dict in sorted(all_trades_by_symbol.items()):
-        print(f"\n  Symbol: {symbol}")
+    for sym, tf_dict in sorted(all_trades_by_symbol.items()):
+        print(f"\n  Symbol: {sym}")
         if len(tf_dict) < 2:
             tf = list(tf_dict.keys())[0]
             trades = tf_dict[tf]
@@ -129,10 +223,24 @@ def main():
 
         if c_n > 0 and s_n > 0:
             diff = c_wr - s_wr
-            symbol = "+" if diff >= 0 else ""
-            print(f"\n    Multi-TF Vorteil: {symbol}{diff:.1f}% WR-Differenz")
+            sign = "+" if diff >= 0 else ""
+            print(f"\n    Multi-TF Vorteil: {sign}{diff:.1f}% WR-Differenz")
+
+        chart_data.append((sym, c_wr, c_n, s_wr, s_n))
 
     print("\n" + "=" * 70)
+
+    chart_path = create_chart(chart_data)
+    if chart_path and not args.no_telegram:
+        token, chat_id = get_telegram_credentials()
+        if token and chat_id:
+            if chart_data:
+                sym, c_wr, c_n, s_wr, s_n = chart_data[0]
+                caption = (f"ZeroBot Multi-TF | {sym} | "
+                           f"Concurrent WR: {c_wr:.1f}% vs Solo: {s_wr:.1f}%")
+            else:
+                caption = "ZeroBot Multi-TF | Keine concurrent Signals"
+            send_telegram_photo(token, chat_id, chart_path, caption)
 
 if __name__ == '__main__':
     main()

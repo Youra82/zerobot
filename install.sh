@@ -54,9 +54,9 @@ echo -e "${GREEN}✔ Abhängigkeiten installiert${NC}"
 # Optionale Abhängigkeiten (für Charts und Excel)
 echo ""
 echo "Installiere optionale Abhängigkeiten (Charts, Excel)..."
-.venv/bin/pip install plotly openpyxl --quiet && \
-    echo -e "${GREEN}✔ plotly + openpyxl installiert${NC}" || \
-    echo -e "${YELLOW}⚠ plotly/openpyxl nicht installiert (Charts/Excel deaktiviert)${NC}"
+.venv/bin/pip install plotly openpyxl matplotlib --quiet && \
+    echo -e "${GREEN}✔ plotly + openpyxl + matplotlib installiert${NC}" || \
+    echo -e "${YELLOW}⚠ plotly/openpyxl/matplotlib nicht installiert (Charts/Excel deaktiviert)${NC}"
 
 # ── Ordnerstruktur anlegen ────────────────────────────────────────────────────
 echo ""

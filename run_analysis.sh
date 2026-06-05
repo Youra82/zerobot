@@ -18,6 +18,14 @@ fi
 source "$SCRIPT_DIR/.venv/bin/activate"
 export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH}"
 
+# ── Telegram-Flag ─────────────────────────────────────────────────────────────
+NO_TELEGRAM=""
+for arg in "$@"; do
+    if [ "$arg" = "--no-telegram" ]; then
+        NO_TELEGRAM="--no-telegram"
+    fi
+done
+
 # ─── Menue ────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -212,7 +220,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/walk_forward.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     2)  echo -e "${GREEN}▶ Slippage & Fee Impact${NC}"
@@ -221,7 +229,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/fee_impact.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     3)  echo -e "${GREEN}▶ Monte Carlo Simulation${NC}"
@@ -233,7 +241,7 @@ run_mode() {
             if ! [[ "$SIMS" =~ ^[0-9]+$ ]]; then SIMS=5000; fi
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/monte_carlo.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS" $NO_TELEGRAM
         ;;
 
     4)  echo -e "${GREEN}▶ Bootstrap Signifikanztest${NC}"
@@ -244,7 +252,7 @@ run_mode() {
             if ! [[ "$MIN_T" =~ ^[0-9]+$ ]]; then MIN_T=10; fi
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/bootstrap_test.py" \
-            --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T"
+            --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T" $NO_TELEGRAM
         ;;
 
     5)  echo -e "${GREEN}▶ RR-Ratio Walk-Forward${NC}"
@@ -253,7 +261,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-            --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     6)  echo -e "${GREEN}▶ ATR-SL-Multiplier Walk-Forward${NC}"
@@ -262,7 +270,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-            --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     7)  echo -e "${GREEN}▶ Trailing Callback Walk-Forward${NC}"
@@ -271,7 +279,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-            --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     8)  echo -e "${GREEN}▶ Parameter Sensitivity (Tornado-Diagramm)${NC}"
@@ -280,7 +288,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sensitivity.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     9)  echo -e "${GREEN}▶ Multi-Timeframe Confirmation${NC}"
@@ -292,7 +300,7 @@ run_mode() {
             if ! [[ "$WH" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WH=4; fi
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/multitf_analysis.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" $NO_TELEGRAM
         ;;
 
     10) echo -e "${GREEN}▶ Parameter-Stabilitaets-Analyse${NC}"
@@ -301,7 +309,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_stability.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     11) echo -e "${GREEN}▶ Anti-Korrelations-Portfolio${NC}"
@@ -310,7 +318,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/correlation.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     12) echo -e "${GREEN}▶ Kelly Position Sizing${NC}"
@@ -319,7 +327,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/kelly_sizing.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     13) echo -e "${GREEN}▶ Regime Performance Analysis${NC}"
@@ -328,7 +336,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_analysis.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     14) echo -e "${GREEN}▶ Brick-Pattern-Kombinations-Analyse${NC}"
@@ -337,7 +345,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/brick_pattern.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     15) echo -e "${GREEN}▶ Confluence Score${NC}"
@@ -349,7 +357,7 @@ run_mode() {
             if ! [[ "$WH" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WH=4; fi
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/confluence.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" $NO_TELEGRAM
         ;;
 
     16) echo -e "${GREEN}▶ Volatilitaets-Filter Optimierung${NC}"
@@ -358,7 +366,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/vol_filter.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     17) echo -e "${GREEN}▶ Tageszeit-Analyse${NC}"
@@ -367,7 +375,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/time_analysis.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     18) echo -e "${GREEN}▶ Regime-adaptive Parameter${NC}"
@@ -376,7 +384,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_adaptive.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     19) echo -e "${GREEN}▶ Drawdown Duration Analysis${NC}"
@@ -385,7 +393,7 @@ run_mode() {
             CAP=$(ask_capital)
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/drawdown_duration.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
     20) echo -e "${GREEN}▶ Brick-Groessen-Sweep (ATR-Multiplier 0.5-2.5)${NC}"
@@ -480,43 +488,43 @@ if [ "$MODE" == "0" ]; then
         echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
         case "$i" in
             1)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/walk_forward.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             2)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/fee_impact.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             3)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/monte_carlo.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS" $NO_TELEGRAM 2>/dev/null || true ;;
             4)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/bootstrap_test.py" \
-                    --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T" $NO_TELEGRAM 2>/dev/null || true ;;
             5)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-                    --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             6)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-                    --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             7)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
-                    --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             8)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sensitivity.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             9)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/multitf_analysis.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" $NO_TELEGRAM 2>/dev/null || true ;;
             10) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_stability.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             11) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/correlation.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             12) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/kelly_sizing.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             13) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_analysis.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             14) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/brick_pattern.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             15) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/confluence.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" $NO_TELEGRAM 2>/dev/null || true ;;
             16) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/vol_filter.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             17) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/time_analysis.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             18) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_adaptive.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
             19) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/drawdown_duration.py" \
-                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM 2>/dev/null || true ;;
         esac
     done
     echo ""

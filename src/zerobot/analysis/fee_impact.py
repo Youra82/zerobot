@@ -17,11 +17,91 @@ def load_configs():
                     result.append((fn, json.load(f)))
     return result
 
+
+def get_telegram_credentials():
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
+            s = json.load(f)
+        tg = s.get('telegram', {})
+        return tg.get('bot_token', ''), tg.get('chat_id', '')
+    except Exception:
+        return None, None
+
+
+def send_telegram_photo(token, chat_id, path, caption=''):
+    try:
+        import requests
+        with open(path, 'rb') as f:
+            requests.post(f'https://api.telegram.org/bot{token}/sendPhoto',
+                          data={'chat_id': chat_id, 'caption': caption},
+                          files={'photo': f}, timeout=30)
+    except Exception as e:
+        print(f"  Telegram Fehler: {e}")
+
+
+def create_chart(fee_levels, results_list, symbol, current_fee=0.06):
+    """results_list: list of (fee, pnl) tuples for the first config"""
+    if not results_list:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  matplotlib nicht verfügbar — kein Chart.")
+        return None
+
+    fees = [r[0] for r in results_list]
+    pnls = [r[1] for r in results_list]
+    labels = [f"{f:.2f}%" for f in fees]
+    colors = ['#16a34a' if p >= 0 else '#ef4444' for p in pnls]
+    edge_colors = ['#f59e0b' if abs(f - current_fee) < 0.001 else '#334155' for f in fees]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.patch.set_facecolor('#0f172a')
+    ax.set_facecolor('#1e293b')
+    ax.tick_params(colors='#94a3b8')
+    for spine in ax.spines.values():
+        spine.set_color('#334155')
+    ax.grid(True, alpha=0.15, color='#475569')
+    ax.xaxis.label.set_color('#94a3b8')
+    ax.yaxis.label.set_color('#94a3b8')
+    ax.title.set_color('white')
+
+    bars = ax.bar(labels, pnls, color=colors, edgecolor=edge_colors, linewidth=1.5)
+    ax.axhline(0, color='#94a3b8', linestyle='--', linewidth=0.8, alpha=0.7)
+
+    for bar, val in zip(bars, pnls):
+        ax.text(bar.get_x() + bar.get_width() / 2,
+                val + (0.3 if val >= 0 else -0.8),
+                f'{val:.1f}%', ha='center', va='bottom' if val >= 0 else 'top',
+                color='white', fontsize=8)
+
+    ax.set_title(f'Fee Impact | {symbol}', color='white', fontsize=12)
+    ax.set_xlabel('Fee Rate', color='#94a3b8')
+    ax.set_ylabel('PnL%', color='#94a3b8')
+
+    from matplotlib.patches import Patch
+    legend = ax.legend(handles=[Patch(facecolor='#f59e0b', label='Bitget Taker (0.06%)')],
+                       facecolor='#1e293b', labelcolor='white', fontsize=8)
+
+    plt.tight_layout()
+
+    path = '/tmp/zerobot_fee_impact.png'
+    plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    docs_path = os.path.join(PROJECT_ROOT, 'docs', 'fee_impact_latest.png')
+    os.makedirs(os.path.dirname(docs_path), exist_ok=True)
+    plt.savefig(docs_path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    plt.close()
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description='Slippage & Fee Impact Analysis')
     parser.add_argument('--start-date', default='2023-01-01')
     parser.add_argument('--end-date', default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--capital', type=float, default=100)
+    parser.add_argument('--no-telegram', action='store_true')
     args = parser.parse_args()
 
     configs = load_configs()
@@ -38,6 +118,9 @@ def main():
     print(f"  Zeitraum: {args.start_date} bis {args.end_date}  |  Kapital: {args.capital} USDT")
     print(f"  Aktueller Bitget Taker-Fee: {current_fee}%  (markiert mit *)")
     print()
+
+    chart_data = None
+    chart_symbol = ''
 
     for fn, cfg in configs:
         symbol    = cfg['market']['symbol']
@@ -92,7 +175,19 @@ def main():
             else:
                 print("  Break-Even-Fee liegt ueber dem getesteten Bereich (> 0.20%)")
 
+        # Use first config for chart
+        if chart_data is None:
+            chart_data = [(fee, res.get('total_pnl_pct', 0)) for fee, res in results]
+            chart_symbol = symbol
+
     print("\n" + "=" * 75)
+
+    chart_path = create_chart(fee_levels, chart_data or [], chart_symbol, current_fee)
+    if chart_path and not args.no_telegram:
+        token, chat_id = get_telegram_credentials()
+        if token and chat_id:
+            caption = f"ZeroBot Fee Impact | {chart_symbol} | Break-Even bei 0.06% Bitget-Fee"
+            send_telegram_photo(token, chat_id, chart_path, caption)
 
 if __name__ == '__main__':
     main()

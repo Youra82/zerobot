@@ -17,12 +17,88 @@ def load_configs():
                     result.append((fn, json.load(f)))
     return result
 
+
+def get_telegram_credentials():
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
+            s = json.load(f)
+        tg = s.get('telegram', {})
+        return tg.get('bot_token', ''), tg.get('chat_id', '')
+    except Exception:
+        return None, None
+
+
+def send_telegram_photo(token, chat_id, path, caption=''):
+    try:
+        import requests
+        with open(path, 'rb') as f:
+            requests.post(f'https://api.telegram.org/bot{token}/sendPhoto',
+                          data={'chat_id': chat_id, 'caption': caption},
+                          files={'photo': f}, timeout=30)
+    except Exception as e:
+        print(f"  Telegram Fehler: {e}")
+
+
+def create_chart(chart_rows):
+    """chart_rows: list of (label, wr, total)"""
+    if not chart_rows:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  matplotlib nicht verfügbar — kein Chart.")
+        return None
+
+    labels = [r[0] for r in chart_rows]
+    wrs    = [r[1] for r in chart_rows]
+    counts = [r[2] for r in chart_rows]
+    colors = ['#16a34a' for _ in wrs]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    fig.patch.set_facecolor('#0f172a')
+    ax.set_facecolor('#1e293b')
+    ax.tick_params(colors='#94a3b8')
+    for spine in ax.spines.values():
+        spine.set_color('#334155')
+    ax.grid(True, alpha=0.15, color='#475569')
+    ax.xaxis.label.set_color('#94a3b8')
+    ax.yaxis.label.set_color('#94a3b8')
+    ax.title.set_color('white')
+
+    bars = ax.bar(labels, wrs, color=colors, edgecolor='#334155', linewidth=0.5)
+    ax.axhline(50, color='#f59e0b', linestyle='--', linewidth=1.0,
+               alpha=0.8, label='50% WR')
+
+    for bar, wr, cnt in zip(bars, wrs, counts):
+        ax.text(bar.get_x() + bar.get_width()/2, wr + 0.5,
+                f'{wr:.1f}%\n(n={cnt})', ha='center', va='bottom',
+                color='white', fontsize=9)
+
+    ax.set_ylabel('Win-Rate %', color='#94a3b8')
+    ax.set_xlabel('Confluence-Level', color='#94a3b8')
+    ax.set_title('Confluence Score', color='white', fontsize=12)
+    ax.set_ylim(0, max(wrs) * 1.3 + 5 if wrs else 100)
+    legend = ax.legend(facecolor='#1e293b', labelcolor='white', fontsize=9)
+    plt.tight_layout()
+
+    path = '/tmp/zerobot_confluence.png'
+    plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    docs_path = os.path.join(PROJECT_ROOT, 'docs', 'confluence_latest.png')
+    os.makedirs(os.path.dirname(docs_path), exist_ok=True)
+    plt.savefig(docs_path, dpi=150, bbox_inches='tight', facecolor='#0f172a')
+    plt.close()
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description='Confluence Score Analyse')
     parser.add_argument('--start-date', default='2023-01-01')
     parser.add_argument('--end-date', default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--capital', type=float, default=100)
     parser.add_argument('--window-hours', type=float, default=4)
+    parser.add_argument('--no-telegram', action='store_true')
     args = parser.parse_args()
 
     configs = load_configs()
@@ -94,6 +170,8 @@ def main():
     print(f"  {'Confluence':<20} {'Trades':>8} {'Wins':>8} {'WR%':>8}  Bewertung")
     print(f"  {'─'*60}")
 
+    chart_rows = []
+
     for signal_count in [1, 2, 3]:
         group = confluence_groups.get(signal_count, [])
         label = f"{signal_count} Signal{'e' if signal_count > 1 else ''}" if signal_count < 3 else "3+ Signale"
@@ -112,6 +190,7 @@ def main():
         else:
             bew = "SCHLECHT"
         print(f"  {label:<20} {total:>8} {wins:>8} {wr:>7.1f}%  {bew}")
+        chart_rows.append((label, wr, total))
 
     print(f"  {'─'*60}")
     print(f"\n  Gesamt-Trades analysiert: {len(all_trades)}")
@@ -123,6 +202,13 @@ def main():
         print(f"  Confluence-Effekt (2 vs 1 Signal): {diff:+.1f}% WR-Verbesserung")
 
     print("\n" + "=" * 70)
+
+    chart_path = create_chart(chart_rows)
+    if chart_path and not args.no_telegram:
+        token, chat_id = get_telegram_credentials()
+        if token and chat_id:
+            caption = f"ZeroBot Confluence Score | {len(all_trades)} Trades analysiert"
+            send_telegram_photo(token, chat_id, chart_path, caption)
 
 if __name__ == '__main__':
     main()

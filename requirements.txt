@@ -13,3 +13,4 @@ pytest
 # Optional: Charts & Excel (run_portfolio_optimizer.py, run_analysis.sh)
 plotly
 openpyxl
+matplotlib
