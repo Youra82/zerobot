@@ -107,29 +107,31 @@ def send_telegram_photo(token, chat_id, path, caption=''):
         print(f"  Telegram Fehler: {e}")
 
 
-def create_chart(dd_periods, symbol, tf):
-    if not dd_periods:
+def create_chart(all_dd_entries):
+    """all_dd_entries: list of dicts with keys depth, dur_days, label, is_open"""
+    if not all_dd_entries:
         return None
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
     except ImportError:
         print("  matplotlib nicht verfügbar — kein Chart.")
         return None
 
-    all_depths    = np.array([dd['depth']    for dd in dd_periods], dtype=float)
-    all_durations = np.array([dd['dur_days'] for dd in dd_periods], dtype=float)
-    valid_mask = ~np.isnan(all_durations)
-    depths    = all_depths[valid_mask].tolist()
-    durations = all_durations[valid_mask].tolist()
+    # Separate closed (known duration) from open
+    closed = [e for e in all_dd_entries if not (e['dur_days'] != e['dur_days'])]
+    all_durs = np.array([e['dur_days'] for e in closed], dtype=float)
+    all_deps = np.array([e['depth']    for e in closed], dtype=float)
+    open_dots = [e for e in all_dd_entries
+                 if not (e['dur_days'] != e['dur_days']) and e['is_open']]
 
-    if not durations:
+    if len(closed) == 0:
         return None
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
     fig.patch.set_facecolor('#0f172a')
-
     for ax in [ax1, ax2]:
         ax.set_facecolor('#1e293b')
         ax.tick_params(colors='#94a3b8')
@@ -140,36 +142,48 @@ def create_chart(dd_periods, symbol, tf):
         ax.yaxis.label.set_color('#94a3b8')
         ax.title.set_color('white')
 
-    # Left: scatter DD depth vs duration (only closed/known periods)
-    ax1.scatter(depths, durations, color='#ef4444', alpha=0.7, edgecolors='#334155',
-                linewidths=0.5, s=50)
-    if len(depths) >= 3:
+    # Left: scatter — closed in red, open in orange
+    closed_no_open = [e for e in closed if not e['is_open']]
+    if closed_no_open:
+        ax1.scatter([e['depth'] for e in closed_no_open],
+                    [e['dur_days'] for e in closed_no_open],
+                    color='#ef4444', alpha=0.75, edgecolors='#334155',
+                    linewidths=0.5, s=55, label=f'Abgeschlossen ({len(closed_no_open)})')
+    if open_dots:
+        ax1.scatter([e['depth'] for e in open_dots],
+                    [e['dur_days'] for e in open_dots],
+                    color='#f59e0b', alpha=0.85, edgecolors='#334155',
+                    linewidths=0.5, s=70, marker='^',
+                    label=f'Noch offen ({len(open_dots)})')
+
+    if len(all_durs) >= 3:
         try:
-            z = np.polyfit(depths, durations, 1)
+            z = np.polyfit(all_deps, all_durs, 1)
             p = np.poly1d(z)
-            x_line = np.linspace(min(depths), max(depths), 50)
-            ax1.plot(x_line, p(x_line), color='#f59e0b', linestyle='--',
-                     linewidth=1.0, alpha=0.7, label='Trend')
-            ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
+            x_line = np.linspace(all_deps.min(), all_deps.max(), 50)
+            ax1.plot(x_line, p(x_line), color='#94a3b8', linestyle='--',
+                     linewidth=1.0, alpha=0.6, label='Trend')
         except Exception:
             pass
+
+    ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
     ax1.set_xlabel('DD Tiefe %', color='#94a3b8')
     ax1.set_ylabel('Dauer (Tage)', color='#94a3b8')
-    ax1.set_title(f'DD Tiefe vs Dauer ({len(durations)} abgeschlossen)', color='white', fontsize=11)
+    ax1.set_title(f'DD Tiefe vs Dauer — alle Configs ({len(closed)} Perioden)', color='white', fontsize=10)
 
-    # Right: histogram of recovery durations
-    bins = max(1, min(20, len(durations)))
-    ax2.hist(durations, bins=bins, color='#f59e0b',
-             edgecolor='#1e293b', linewidth=0.3, alpha=0.85)
-    median_dur = float(np.median(durations))
-    ax2.axvline(median_dur, color='#ef4444', linestyle='--', linewidth=1.2,
-                label=f'Median: {median_dur:.1f}d')
+    # Right: histogram of all durations (closed + open = min-duration)
+    bins = max(1, min(20, len(all_durs)))
+    ax2.hist(all_durs, bins=bins, color='#ef4444', edgecolor='#1e293b',
+             linewidth=0.3, alpha=0.85, label='Alle')
+    median_dur = float(np.median(all_durs))
+    ax2.axvline(median_dur, color='#f59e0b', linestyle='--', linewidth=1.4,
+                label=f'Median: {median_dur:.0f}d')
     ax2.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
     ax2.set_xlabel('Dauer (Tage)', color='#94a3b8')
     ax2.set_ylabel('Häufigkeit', color='#94a3b8')
-    ax2.set_title('Drawdown-Dauer Verteilung', color='white', fontsize=11)
+    ax2.set_title('Drawdown-Dauer Verteilung (alle Configs)', color='white', fontsize=10)
 
-    fig.suptitle(f'Drawdown Duration | {symbol} ({tf})', color='white', fontsize=13)
+    fig.suptitle('ZeroBot Drawdown Duration — Alle Strategien kombiniert', color='white', fontsize=12)
     plt.tight_layout()
 
     path = '/tmp/zerobot_drawdown_duration.png'
@@ -200,8 +214,7 @@ def main():
     print(f"  Zeitraum: {args.start_date} bis {args.end_date}  |  Kapital: {args.capital} USDT")
     print()
 
-    first_chart = True
-    chart_path  = None
+    all_combined = []  # all dd entries across configs for combined chart
 
     for fn, cfg in configs:
         symbol    = cfg['market']['symbol']
@@ -246,14 +259,16 @@ def main():
         durations = [dd['dur_days'] for dd in dd_periods]
         depths    = [dd['depth']    for dd in dd_periods]
 
-        dur_arr = np.array(durations, dtype=float)
+        dur_arr    = np.array(durations, dtype=float)
         valid_durs = dur_arr[~np.isnan(dur_arr)]
-        n_known = len(valid_durs)
-        n_open  = len(durations) - n_known
+        n_unknown  = int(np.sum(np.isnan(dur_arr)))
+        n_open_dd  = sum(1 for dd in dd_periods if dd['end'] is None and not (dd['dur_days'] != dd['dur_days']))
+        n_closed   = len(dd_periods) - n_unknown - n_open_dd
 
-        print(f"\n  Statistik ({len(dd_periods)} Drawdown-Perioden, {n_open} offen/unbekannt):")
-        if n_known > 0:
-            print(f"    Avg Dauer:       {np.mean(valid_durs):>7.1f} Tage  (aus {n_known} abgeschlossenen)")
+        print(f"\n  Statistik ({len(dd_periods)} Perioden: {n_closed} abgeschlossen, {n_open_dd} offen, {n_unknown} unbekannter Start):")
+        if len(valid_durs) > 0:
+            open_note = "  (inkl. laufender Drawdowns)" if n_open_dd > 0 else ""
+            print(f"    Avg Dauer:       {np.mean(valid_durs):>7.1f} Tage{open_note}")
             print(f"    Max Dauer:       {np.max(valid_durs):>7.1f} Tage")
             print(f"    90. Pz Dauer:    {np.percentile(valid_durs, 90):>7.1f} Tage")
         else:
@@ -261,19 +276,24 @@ def main():
         print(f"    Avg Tiefe:       {np.mean(depths):>7.1f}%")
         print(f"    Max Tiefe:       {np.max(depths):>7.1f}%")
 
-        if first_chart:
-            chart_path = create_chart(dd_periods, symbol, timeframe)
-            first_chart = False
+        label = f"{symbol.split('/')[0]} {timeframe}"
+        for dd in dd_periods:
+            all_combined.append({
+                'depth':    dd['depth'],
+                'dur_days': dd['dur_days'],
+                'label':    label,
+                'is_open':  dd['end'] is None,
+            })
 
     print("\n" + "=" * 80)
+
+    chart_path = create_chart(all_combined)
 
     if chart_path and not args.no_telegram:
         token, chat_id = get_telegram_credentials()
         if token and chat_id:
-            fn0, cfg0 = configs[0]
-            sym = cfg0['market']['symbol']
-            tf  = cfg0['market']['timeframe']
-            caption = f"ZeroBot Drawdown Duration | {sym} ({tf}) | Tiefe vs Dauer"
+            n_total = sum(1 for e in all_combined if not (e['dur_days'] != e['dur_days']))
+            caption = f"ZeroBot Drawdown Duration — Alle Strategien | {n_total} Perioden kombiniert"
             send_telegram_photo(token, chat_id, chart_path, caption)
 
 if __name__ == '__main__':
