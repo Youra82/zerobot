@@ -198,11 +198,18 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     wins_count += 1
                 trades_count += 1
                 if return_trades:
+                    net = pnl_usd - total_fees
                     trades_list.append({
-                        'timestamp': str(timestamp),
-                        'side': position['side'],
-                        'pnl_usd': round(pnl_usd - total_fees, 4),
-                        'win': (pnl_usd - total_fees) > 0,
+                        'entry_time':  str(position.get('entry_time', '')),
+                        'exit_time':   str(timestamp),
+                        'side':        position['side'],
+                        'entry_price': position['entry_price'],
+                        'exit_price':  exit_price,
+                        'stop_loss':   position['stop_loss'],
+                        'take_profit': position['take_profit'],
+                        'pnl_usd':     round(net, 4),
+                        'win':         net > 0,
+                        'capital_after': round(current_capital, 4),
                     })
                 position      = None
                 peak_capital  = max(peak_capital, current_capital)
@@ -249,6 +256,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     'take_profit':    tp,
                     'margin_used':    margin_needed,
                     'notional_value': final_notional,
+                    'entry_time':     timestamp,
                 }
 
     win_rate      = (wins_count / trades_count * 100) if trades_count > 0 else 0

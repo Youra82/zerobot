@@ -21,17 +21,30 @@ echo -e "${YELLOW}Wähle einen Modus:${NC}"
 echo "  1) Einzel-Backtest               (jede Config einzeln simuliert)"
 echo "  2) Manuelle Portfolio-Simulation (du wählst die Strategien)"
 echo "  3) Automatische Portfolio-Opt.   (Bot wählt das beste Portfolio)"
+echo "  4) Interaktive Charts            (Candlestick + Trade-Signale mit Entry/Exit-Marker)"
 echo ""
-read -p "Auswahl (1-3) [Standard: 1]: " MODE
+read -p "Auswahl (1-4) [Standard: 1]: " MODE
 MODE="${MODE//[$'\r\n ']/}"
 MODE="${MODE:-1}"
 
-if [[ ! "$MODE" =~ ^[1-3]$ ]]; then
+if [[ ! "$MODE" =~ ^[1-4]$ ]]; then
     echo -e "${RED}Ungültige Eingabe. Verwende Modus 1.${NC}"
     MODE=1
 fi
 
-# ── Zeitraum und Kapital abfragen ─────────────────────────────────────────────
+# ── Modus 4: fragt intern selbst nach Datum/Kapital ─────────────────────────
+if [ "$MODE" == "4" ]; then
+    $PYTHON - <<PYEOF
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/src')
+from zerobot.analysis.interactive_chart import run_interactive_chart
+run_interactive_chart()
+PYEOF
+    deactivate
+    exit 0
+fi
+
+# ── Zeitraum und Kapital abfragen (Modi 1-3) ─────────────────────────────────
 echo ""
 read -p "Startdatum (JJJJ-MM-TT) [Standard: 2024-01-01]: " START
 START="${START//[$'\r\n ']/}"
@@ -57,8 +70,9 @@ if [ "$MODE" == "3" ]; then
         --max-dd  "$MAX_DD" \
         --start-date "$START" \
         --end-date   "$END"
+
 else
-    # Übergabe via Env-Variablen an show_results.py (liest stdin)
+    # Modi 1 + 2
     export ZB_START_DATE="$START"
     export ZB_END_DATE="$END"
     export ZB_CAPITAL="$CAP"
