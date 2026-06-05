@@ -148,65 +148,57 @@ def create_chart(all_dd_entries, equity_curve=None, equity_ts=None, equity_dd_pe
         ax.yaxis.label.set_color('#94a3b8')
         ax.title.set_color('white')
 
-    # Panel 1: scatter depth vs duration
-    closed_done = [e for e in closed if not e['is_open']]
-    for dots, color, marker, label_pfx in [
-        (closed_done, '#ef4444', 'o', 'Abgeschlossen'),
-        (open_dots,   '#f59e0b', '^', 'Noch offen'),
-    ]:
-        if dots:
-            ax1.scatter([e['depth'] for e in dots], [e['dur_days'] for e in dots],
-                        color=color, alpha=0.75, edgecolors='#334155',
-                        linewidths=0.5, s=55, marker=marker,
-                        label=f'{label_pfx} ({len(dots)})')
+    # Panel 1: scatter depth vs duration — colored by severity like dnabot
+    def _depth_color(d):
+        if d > 20: return '#ef4444'   # rot
+        if d > 10: return '#f59e0b'   # orange
+        return '#22c55e'              # grün
+
+    for entry in closed:
+        ax1.scatter(entry['depth'], entry['dur_days'],
+                    color=_depth_color(entry['depth']),
+                    alpha=0.80, edgecolors='#334155',
+                    linewidths=0.5, s=55, zorder=3)
+
     if len(all_durs) >= 3:
         try:
             z = np.polyfit(all_deps, all_durs, 1)
             p = np.poly1d(z)
             x_line = np.linspace(all_deps.min(), all_deps.max(), 50)
             ax1.plot(x_line, p(x_line), color='#94a3b8', linestyle='--',
-                     linewidth=1.0, alpha=0.6, label='Trend')
+                     linewidth=1.0, alpha=0.7, label='Trend')
         except Exception:
             pass
     ax1.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
-    ax1.set_xlabel('DD Tiefe %', color='#94a3b8')
-    ax1.set_ylabel('Dauer (Tage)', color='#94a3b8')
-    ax1.set_title(f'DD Tiefe vs Dauer — alle Configs ({len(closed)} Perioden)', color='white', fontsize=10)
+    ax1.set_xlabel('Drawdown-Tiefe (%)', color='#94a3b8')
+    ax1.set_ylabel('Erholungsdauer (Tage)', color='#94a3b8')
+    ax1.set_title('Tiefe vs. Erholungsdauer\n(rot>20%, orange>10%, grün≤10%)',
+                  color='white', fontsize=10)
 
-    # Panel 2: histogram of all durations
+    # Panel 2: histogram — blue like dnabot
     bins = max(1, min(20, len(all_durs)))
-    ax2.hist(all_durs, bins=bins, color='#ef4444', edgecolor='#1e293b',
+    ax2.hist(all_durs, bins=bins, color='#3b82f6', edgecolor='#1e293b',
              linewidth=0.3, alpha=0.85)
-    median_dur = float(np.median(all_durs))
-    p90_dur    = float(np.percentile(all_durs, 90))
-    ax2.axvline(median_dur, color='#f59e0b', linestyle='-',  linewidth=1.4,
-                label=f'Ø {median_dur:.0f}d')
-    ax2.axvline(p90_dur,    color='#ef4444', linestyle='--', linewidth=1.2,
-                label=f'90. Pz {p90_dur:.0f}d')
+    mean_dur = float(np.mean(all_durs))
+    p90_dur  = float(np.percentile(all_durs, 90))
+    ax2.axvline(mean_dur, color='#f59e0b', linestyle='-',  linewidth=1.6,
+                label=f'Ø {mean_dur:.0f}d')
+    ax2.axvline(p90_dur,  color='#ef4444', linestyle='--', linewidth=1.3,
+                label=f'90. Perz. {p90_dur:.0f}d')
     ax2.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
-    ax2.set_xlabel('Dauer (Tage)', color='#94a3b8')
+    ax2.set_xlabel('Erholungsdauer (Tage)', color='#94a3b8')
     ax2.set_ylabel('Häufigkeit', color='#94a3b8')
-    ax2.set_title('Verteilung der Erholungsdauern (alle Configs)', color='white', fontsize=10)
+    ax2.set_title('Verteilung der Erholungsdauern', color='white', fontsize=10)
 
-    # Panel 3: equity curve with drawdown zones
+    # Panel 3: equity curve with drawdown zones — like dnabot
     if ax3 is not None:
-        # Build equity timestamps (skip first None entry)
         ts_valid = [t for t in equity_ts[1:] if t is not None]
         eq_valid  = equity_curve[1:len(ts_valid) + 1]
         try:
             ts_dt = pd.to_datetime(ts_valid, utc=True)
-            ax3.plot(ts_dt, eq_valid, color='#3b82f6', linewidth=1.2, label='Equity', zorder=3)
 
-            # Peak line
-            peaks = []
-            peak = equity_curve[0]
-            for v in eq_valid:
-                peak = max(peak, v)
-                peaks.append(peak)
-            ax3.plot(ts_dt, peaks, color='#16a34a', linewidth=0.8,
-                     linestyle='--', alpha=0.55, label='Peak', zorder=2)
-
-            # Shade drawdown zones
+            # Shade drawdown zones first (background, zorder=1)
+            dd_patch_drawn = False
             if equity_dd_periods:
                 last_ts = ts_dt[-1] if len(ts_dt) else None
                 for dd in equity_dd_periods:
@@ -216,10 +208,37 @@ def create_chart(all_dd_entries, equity_curve=None, equity_ts=None, equity_dd_pe
                         t0 = pd.to_datetime(dd['start'], utc=True)
                         t1 = (pd.to_datetime(dd['end'], utc=True)
                               if dd['end'] else last_ts)
-                        if t0 is not None and t1 is not None and not pd.isna(t0) and not pd.isna(t1):
-                            ax3.axvspan(t0, t1, color='#ef4444', alpha=0.15, zorder=1)
+                        if (t0 is not None and t1 is not None
+                                and not pd.isna(t0) and not pd.isna(t1)):
+                            ax3.axvspan(t0, t1, color='#b91c1c', alpha=0.20, zorder=1)
+                            dd_patch_drawn = True
                     except Exception:
                         pass
+
+            # Peak line
+            peaks = []
+            peak = equity_curve[0]
+            for v in eq_valid:
+                peak = max(peak, v)
+                peaks.append(peak)
+            ax3.plot(ts_dt, peaks, color='#4b5563', linewidth=0.9,
+                     linestyle='-', alpha=0.70, label='Peak', zorder=2)
+
+            # Equity line on top
+            ax3.plot(ts_dt, eq_valid, color='#3b82f6', linewidth=1.3,
+                     label='Equity', zorder=3)
+
+            # Dummy patch for legend "Drawdown"
+            if dd_patch_drawn:
+                import matplotlib.patches as mpatches
+                dd_patch = mpatches.Patch(color='#b91c1c', alpha=0.40, label='Drawdown')
+                handles, labels = ax3.get_legend_handles_labels()
+                handles.append(dd_patch)
+                labels.append('Drawdown')
+                ax3.legend(handles, labels, facecolor='#1e293b',
+                            labelcolor='white', fontsize=8)
+            else:
+                ax3.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
 
             ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
             ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
@@ -227,13 +246,12 @@ def create_chart(all_dd_entries, equity_curve=None, equity_ts=None, equity_dd_pe
         except Exception:
             ax3.text(0.5, 0.5, 'Kein Equity-Chart', transform=ax3.transAxes,
                      color='#94a3b8', ha='center', va='center')
+            ax3.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
 
-        ax3.legend(facecolor='#1e293b', labelcolor='white', fontsize=8)
         ax3.set_xlabel('Datum', color='#94a3b8')
         ax3.set_ylabel('Equity (USDT)', color='#94a3b8')
-        ax3.set_title(f'Equity-Kurve mit Drawdown-Zonen\n({equity_label})', color='white', fontsize=10)
+        ax3.set_title(f'Equity-Kurve mit Drawdown-Zonen', color='white', fontsize=10)
 
-    n_closed  = len(closed_done)
     avg_depth = float(np.mean(all_deps)) if len(all_deps) > 0 else 0
     avg_dur   = float(np.mean(all_durs)) if len(all_durs) > 0 else 0
     fig.suptitle(
