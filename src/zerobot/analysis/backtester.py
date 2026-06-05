@@ -90,7 +90,8 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
         return pd.DataFrame()
 
 
-def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False):
+def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
+                 fee_pct_override=None, return_trades=False):
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
@@ -119,11 +120,12 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     risk_per_trade_pct   = risk_params.get('risk_per_trade_pct', 1.0) / 100
     activation_rr        = risk_params.get('trailing_stop_activation_rr', 2.0)
     leverage             = risk_params.get('leverage', 10)
-    fee_pct              = 0.06 / 100
+    fee_pct              = (fee_pct_override / 100) if fee_pct_override is not None else (0.06 / 100)
     atr_multiplier_sl    = risk_params.get('atr_multiplier_sl', 2.0)
     min_sl_pct           = risk_params.get('min_sl_pct', 0.3) / 100.0
     absolute_max_notional = 1000000
 
+    trades_list = []
     params_for_logic = {"strategy": strategy_params, "risk": risk_params}
 
     for timestamp, current_candle in processed_data.iterrows():
@@ -155,6 +157,13 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                 if (pnl_usd - total_fees) > 0:
                     wins_count += 1
                 trades_count += 1
+                if return_trades:
+                    trades_list.append({
+                        'timestamp': str(timestamp),
+                        'side': position['side'],
+                        'pnl_usd': round(pnl_usd - total_fees, 4),
+                        'win': (pnl_usd - total_fees) > 0,
+                    })
                 position      = None
                 peak_capital  = max(peak_capital, current_capital)
                 if peak_capital > 0:
@@ -206,10 +215,13 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     final_pnl_pct = ((current_capital - start_capital) / start_capital) * 100 if start_capital > 0 else 0
     final_capital = max(0, current_capital)
 
-    return {
+    result = {
         "total_pnl_pct":   final_pnl_pct,
         "trades_count":    trades_count,
         "win_rate":        win_rate,
         "max_drawdown_pct": max_drawdown_pct,
         "end_capital":     final_capital,
     }
+    if return_trades:
+        result['trades'] = trades_list
+    return result

@@ -1,11 +1,5 @@
 #!/bin/bash
 # run_analysis.sh — ZeroBot Renko Wissenschaftliche Analysen
-#
-# Alle Analysen unter einem Befehl. Interaktive Auswahl.
-#
-# Ausführung:
-#   ./run_analysis.sh
-#   ./run_analysis.sh --no-telegram
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,44 +10,58 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="$SCRIPT_DIR/.venv/bin/python3"
-NO_TELEGRAM=""
-
-for arg in "$@"; do
-    [[ "$arg" == "--no-telegram" ]] && NO_TELEGRAM="--no-telegram"
-done
 
 if [ ! -f "$PYTHON" ]; then
-    echo -e "${RED}FEHLER: .venv nicht gefunden. Erst install.sh ausführen!${NC}"
+    echo -e "${RED}FEHLER: .venv nicht gefunden. Erst install.sh ausfuehren!${NC}"
     exit 1
 fi
 source "$SCRIPT_DIR/.venv/bin/activate"
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH}"
 
-# ─── Menü ─────────────────────────────────────────────────────────────────────
+# ─── Menue ────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "======================================================="
-echo -e "  ${BOLD}ZeroBot — Renko Analysen${NC}"
+echo -e "  ${BOLD}ZeroBot — Renko Wissenschaftliche Analysen${NC}"
 echo "======================================================="
 echo ""
-echo -e "  ${CYAN}── Strategie-Analyse ───────────────────────────────${NC}"
-echo "   1) Einzel-Backtest            (alle Configs einzeln)"
-echo "   2) Manuelle Portfolio-Sim.    (eigene Auswahl)"
-echo "   3) Auto Portfolio-Optimierung (bestes Portfolio finden)"
+echo -e "  ${CYAN}── Prioritaet 1: Fundament ─────────────────────────${NC}"
+echo "   1) Walk-Forward Out-of-Sample Test"
+echo "   2) Slippage & Fee Impact"
+echo "   3) Monte Carlo Simulation"
+echo "   4) Bootstrap Signifikanztest"
 echo ""
-echo -e "  ${CYAN}── Renko-spezifische Analysen ──────────────────────${NC}"
-echo "   4) Brick-Größen-Sweep         (ATR-Multiplier 0.5–2.5 testen)"
-echo "   5) Trend-Längen-Analyse       (trend_min_bricks 2–6 vergleichen)"
-echo "   6) Reversal-Bricks-Analyse    (reversal_bricks 1–4 vergleichen)"
-echo "   7) Volumen-Filter Auswirkung  (mit / ohne vol_filter)"
+echo -e "  ${CYAN}── Prioritaet 2: Parameter-Optimierung ─────────────${NC}"
+echo "   5) RR-Ratio Walk-Forward"
+echo "   6) ATR-SL-Multiplier Walk-Forward"
+echo "   7) Trailing Callback Walk-Forward"
+echo "   8) Parameter Sensitivity (Tornado-Diagramm)"
 echo ""
-echo -e "  ${CYAN}── Risiko & Robustheit ─────────────────────────────${NC}"
-echo "   8) RR-Ratio Sweep             (1.0–4.0 vergleichen)"
-echo "   9) ATR-SL-Multiplier Sweep    (1.0–4.0 vergleichen)"
-echo "  10) Timeframe-Vergleich        (1h vs 4h vs 6h)"
+echo -e "  ${CYAN}── Prioritaet 3: Systemverbesserung ─────────────────${NC}"
+echo "   9) Multi-Timeframe Confirmation"
+echo "  10) Parameter-Stabilitaets-Analyse"
+echo "  11) Anti-Korrelations-Portfolio"
+echo "  12) Kelly Position Sizing"
 echo ""
-echo "   0) Alle Analysen nacheinander (Standard-Werte)"
+echo -e "  ${CYAN}── Prioritaet 4-6: Feintuning ───────────────────────${NC}"
+echo "  13) Regime Performance Analysis"
+echo "  14) Brick-Pattern-Kombinations-Analyse"
+echo "  15) Confluence Score"
+echo "  16) Volatilitaets-Filter Optimierung"
+echo "  17) Tageszeit-Analyse"
+echo "  18) Regime-adaptive Parameter"
+echo "  19) Drawdown Duration Analysis"
 echo ""
-read -p "Auswahl (0-10): " MODE
+echo -e "  ${CYAN}── Renko-Schnell-Sweeps ────────────────────────────${NC}"
+echo "  20) Brick-Groessen-Sweep     (ATR-Multiplier 0.5-2.5)"
+echo "  21) Trend-Laengen-Sweep      (trend_min_bricks 2-6)"
+echo "  22) Reversal-Bricks-Sweep    (reversal_bricks 1-4)"
+echo "  23) Volumen-Filter Vergleich"
+echo "  24) Timeframe-Vergleich"
+echo ""
+echo "   0) Alle 1-19 Analysen nacheinander"
+echo ""
+read -p "Auswahl (0-24): " MODE
 MODE="${MODE//[$'\r\n ']/}"
 echo ""
 
@@ -67,16 +75,16 @@ ask_capital() {
 }
 
 ask_dates() {
-    read -p "Startdatum (JJJJ-MM-TT) [Standard: 2024-01-01]: " SD
+    read -p "Startdatum (JJJJ-MM-TT) [Standard: 2023-01-01]: " SD
     SD="${SD//[$'\r\n ']/}"
-    SD="${SD:-2024-01-01}"
+    SD="${SD:-2023-01-01}"
     read -p "Enddatum   (JJJJ-MM-TT) [Standard: Heute]: " ED
     ED="${ED//[$'\r\n ']/}"
     ED="${ED:-$(date +%Y-%m-%d)}"
     echo "$SD $ED"
 }
 
-# ── Inline-Backtester für Sweeps ─────────────────────────────────────────────
+# ── Inline-Sweep Funktion (fuer Items 20-24) ─────────────────────────────────
 
 run_sweep() {
     local SWEEP_TYPE="$1"
@@ -95,7 +103,6 @@ capital    = $CAP
 start_date = '$SD'
 end_date   = '$ED'
 
-# Lade alle verfügbaren Configs
 configs_dir = os.path.join('$SCRIPT_DIR', 'src', 'zerobot', 'strategy', 'configs')
 configs = []
 if os.path.isdir(configs_dir):
@@ -105,10 +112,10 @@ if os.path.isdir(configs_dir):
                 configs.append(json.load(f))
 
 if not configs:
-    print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
+    print("Keine Configs gefunden. Zuerst run_pipeline.sh ausfuehren.")
     sys.exit(0)
 
-config = configs[0]
+config    = configs[0]
 symbol    = config['market']['symbol']
 timeframe = config['market']['timeframe']
 risk      = config.get('risk', {})
@@ -150,30 +157,36 @@ print(f"\n{'─'*65}")
 print(f"  {'Wert':<12} {'Trades':>8} {'Win%':>8} {'PnL%':>10} {'MaxDD%':>10}")
 print(f"{'─'*65}")
 
+all_pnls = []
 for val in values:
     strat = dict(base_strat)
     r = dict(risk)
-
     if param_name in ('atr_multiplier','trend_min_bricks','reversal_bricks','vol_filter_enabled'):
         strat[param_name] = val
     elif param_name == 'rr_ratio':
         r['risk_reward_ratio'] = val
     elif param_name == 'atr_sl':
         r['atr_multiplier_sl'] = val
+    res = run_backtest(data.copy(), strat, r, capital, verbose=False)
+    all_pnls.append(res.get('total_pnl_pct', 0))
 
+best_pnl = max(all_pnls) if all_pnls else 0
+
+for idx, val in enumerate(values):
+    strat = dict(base_strat)
+    r = dict(risk)
+    if param_name in ('atr_multiplier','trend_min_bricks','reversal_bricks','vol_filter_enabled'):
+        strat[param_name] = val
+    elif param_name == 'rr_ratio':
+        r['risk_reward_ratio'] = val
+    elif param_name == 'atr_sl':
+        r['atr_multiplier_sl'] = val
     res = run_backtest(data.copy(), strat, r, capital, verbose=False)
     pnl = res.get('total_pnl_pct', 0)
     wr  = res.get('win_rate', 0)
     tr  = res.get('trades_count', 0)
     dd  = res.get('max_drawdown_pct', 0) * 100
-    mark = ' ◀ BEST' if pnl == max(
-        run_backtest(data.copy(),
-            {**base_strat, param_name: v} if param_name in base_strat
-                else {**base_strat}, {**risk, 'risk_reward_ratio': v} if param_name == 'rr_ratio'
-                    else {**risk, 'atr_multiplier_sl': v} if param_name == 'atr_sl'
-                        else {**risk}, capital).get('total_pnl_pct', 0)
-        for v in values
-    ) else ''
+    mark = ' <-- BEST' if abs(pnl - best_pnl) < 0.001 else ''
     print(f"  {str(val):<12} {tr:>8} {wr:>7.1f}% {pnl:>9.1f}% {dd:>9.1f}%{mark}")
 
 print(f"{'─'*65}")
@@ -184,99 +197,222 @@ PYEOF
 
 run_mode() {
     local m="$1"
+    local SD="${2:-2023-01-01}"
+    local ED="${3:-$(date +%Y-%m-%d)}"
+    local CAP="${4:-100}"
+    local SIMS="${5:-5000}"
+    local WH="${6:-4}"
+    local MIN_T="${7:-10}"
+
     case "$m" in
 
-    1)  echo -e "${GREEN}▶ Einzel-Backtest${NC}"
-        DATES=$(ask_dates)
-        SD=$(echo $DATES | cut -d' ' -f1)
-        ED=$(echo $DATES | cut -d' ' -f2)
-        CAP=$(ask_capital)
-        export ZB_START_DATE="$SD" ZB_END_DATE="$ED" ZB_CAPITAL="$CAP"
-        $PYTHON -c "
-import os,sys; sys.path.insert(0,'$SCRIPT_DIR/src')
-from zerobot.analysis.show_results import run_single_analysis
-run_single_analysis(os.environ['ZB_START_DATE'],os.environ['ZB_END_DATE'],int(float(os.environ['ZB_CAPITAL'])))
-"
+    1)  echo -e "${GREEN}▶ Walk-Forward Out-of-Sample Test${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/walk_forward.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
         ;;
 
-    2)  echo -e "${GREEN}▶ Manuelle Portfolio-Simulation${NC}"
-        DATES=$(ask_dates)
-        SD=$(echo $DATES | cut -d' ' -f1)
-        ED=$(echo $DATES | cut -d' ' -f2)
-        CAP=$(ask_capital)
-        export ZB_START_DATE="$SD" ZB_END_DATE="$ED" ZB_CAPITAL="$CAP"
-        $PYTHON -c "
-import os,sys; sys.path.insert(0,'$SCRIPT_DIR/src')
-from zerobot.analysis.show_results import run_shared_mode
-run_shared_mode(False,os.environ['ZB_START_DATE'],os.environ['ZB_END_DATE'],int(float(os.environ['ZB_CAPITAL'])),999.0)
-"
+    2)  echo -e "${GREEN}▶ Slippage & Fee Impact${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/fee_impact.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
         ;;
 
-    3)  echo -e "${GREEN}▶ Auto Portfolio-Optimierung${NC}"
-        DATES=$(ask_dates)
-        SD=$(echo $DATES | cut -d' ' -f1)
-        ED=$(echo $DATES | cut -d' ' -f2)
-        CAP=$(ask_capital)
-        read -p "Max. Drawdown in % [Standard: 30]: " DD
-        DD="${DD//[$'\r\n ']/}"
-        if ! [[ "$DD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then DD=30; fi
-        $PYTHON "$SCRIPT_DIR/run_portfolio_optimizer.py" \
-            --capital "$CAP" --max-dd "$DD" \
-            --start-date "$SD" --end-date "$ED"
+    3)  echo -e "${GREEN}▶ Monte Carlo Simulation${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+            read -p "Anzahl Simulationen [Standard: 5000]: " SIMS
+            SIMS="${SIMS//[$'\r\n ']/}"
+            if ! [[ "$SIMS" =~ ^[0-9]+$ ]]; then SIMS=5000; fi
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/monte_carlo.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS"
         ;;
 
-    4)  echo -e "${GREEN}▶ Brick-Größen-Sweep (ATR-Multiplier 0.5–2.5)${NC}"
-        echo "  Zeigt wie sich verschiedene Brick-Größen auf Performance auswirken."
-        echo ""
+    4)  echo -e "${GREEN}▶ Bootstrap Signifikanztest${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            read -p "Minimale Trades [Standard: 10]: " MIN_T
+            MIN_T="${MIN_T//[$'\r\n ']/}"
+            if ! [[ "$MIN_T" =~ ^[0-9]+$ ]]; then MIN_T=10; fi
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/bootstrap_test.py" \
+            --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T"
+        ;;
+
+    5)  echo -e "${GREEN}▶ RR-Ratio Walk-Forward${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+            --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    6)  echo -e "${GREEN}▶ ATR-SL-Multiplier Walk-Forward${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+            --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    7)  echo -e "${GREEN}▶ Trailing Callback Walk-Forward${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+            --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    8)  echo -e "${GREEN}▶ Parameter Sensitivity (Tornado-Diagramm)${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sensitivity.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    9)  echo -e "${GREEN}▶ Multi-Timeframe Confirmation${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+            read -p "Gleichzeitigkeits-Fenster in Stunden [Standard: 4]: " WH
+            WH="${WH//[$'\r\n ']/}"
+            if ! [[ "$WH" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WH=4; fi
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/multitf_analysis.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH"
+        ;;
+
+    10) echo -e "${GREEN}▶ Parameter-Stabilitaets-Analyse${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_stability.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    11) echo -e "${GREEN}▶ Anti-Korrelations-Portfolio${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/correlation.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    12) echo -e "${GREEN}▶ Kelly Position Sizing${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/kelly_sizing.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    13) echo -e "${GREEN}▶ Regime Performance Analysis${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_analysis.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    14) echo -e "${GREEN}▶ Brick-Pattern-Kombinations-Analyse${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/brick_pattern.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    15) echo -e "${GREEN}▶ Confluence Score${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+            read -p "Gleichzeitigkeits-Fenster in Stunden [Standard: 4]: " WH
+            WH="${WH//[$'\r\n ']/}"
+            if ! [[ "$WH" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WH=4; fi
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/confluence.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH"
+        ;;
+
+    16) echo -e "${GREEN}▶ Volatilitaets-Filter Optimierung${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/vol_filter.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    17) echo -e "${GREEN}▶ Tageszeit-Analyse${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/time_analysis.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    18) echo -e "${GREEN}▶ Regime-adaptive Parameter${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_adaptive.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    19) echo -e "${GREEN}▶ Drawdown Duration Analysis${NC}"
+        if [ -z "$2" ]; then
+            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/drawdown_duration.py" \
+            --start-date "$SD" --end-date "$ED" --capital "$CAP"
+        ;;
+
+    20) echo -e "${GREEN}▶ Brick-Groessen-Sweep (ATR-Multiplier 0.5-2.5)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
         run_sweep "atr_multiplier" "$CAP" "$SD" "$ED"
         ;;
 
-    5)  echo -e "${GREEN}▶ Trend-Längen-Analyse (trend_min_bricks 2–6)${NC}"
-        echo "  Wie viele Trend-Bricks brauchen wir für zuverlässige Signale?"
-        echo ""
+    21) echo -e "${GREEN}▶ Trend-Laengen-Sweep (trend_min_bricks 2-6)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
         run_sweep "trend_min_bricks" "$CAP" "$SD" "$ED"
         ;;
 
-    6)  echo -e "${GREEN}▶ Reversal-Bricks-Analyse (1–4 Bricks)${NC}"
-        echo "  1 Brick = sofortiger Einstieg (mehr Trades, mehr Fehlsignale)"
-        echo "  3+ Bricks = späte Bestätigung (weniger Trades, mehr Sicherheit)"
-        echo ""
+    22) echo -e "${GREEN}▶ Reversal-Bricks-Sweep (1-4 Bricks)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
         run_sweep "reversal_bricks" "$CAP" "$SD" "$ED"
         ;;
 
-    7)  echo -e "${GREEN}▶ Volumen-Filter Auswirkung${NC}"
-        echo "  Vergleicht Performance mit und ohne Volumen-Bestätigung."
-        echo ""
+    23) echo -e "${GREEN}▶ Volumen-Filter Vergleich${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
         run_sweep "vol_filter" "$CAP" "$SD" "$ED"
         ;;
 
-    8)  echo -e "${GREEN}▶ RR-Ratio Sweep (1.0–4.0)${NC}"
-        echo "  Findet das optimale Risiko-Rendite-Verhältnis für diese Renko-Strategie."
-        echo ""
-        DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
-        CAP=$(ask_capital)
-        run_sweep "rr_ratio" "$CAP" "$SD" "$ED"
-        ;;
-
-    9)  echo -e "${GREEN}▶ ATR-SL-Multiplier Sweep (1.0–4.0)${NC}"
-        echo "  Wie weit soll der SL vom Entry entfernt sein (in ATR-Vielfachen)?"
-        echo ""
-        DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
-        CAP=$(ask_capital)
-        run_sweep "atr_sl" "$CAP" "$SD" "$ED"
-        ;;
-
-    10) echo -e "${GREEN}▶ Timeframe-Vergleich${NC}"
-        echo "  Welcher Timeframe funktioniert am besten für Renko?"
-        echo ""
+    24) echo -e "${GREEN}▶ Timeframe-Vergleich${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
         read -p "Coin (z.B. DOGE) [Standard: DOGE]: " COIN_INPUT
@@ -322,56 +458,70 @@ print(f"{'─'*65}")
 PYEOF2
         ;;
 
-    *)  echo -e "${RED}Ungültige Auswahl: $m${NC}" ;;
+    *)  echo -e "${RED}Ungueltige Auswahl: $m${NC}" ;;
     esac
 }
 
-# ── Batch-Modus ───────────────────────────────────────────────────────────────
+# ── Batch-Modus (alle 1-19) ───────────────────────────────────────────────────
 
 if [ "$MODE" == "0" ]; then
-    echo -e "${YELLOW}▶ Alle Analysen mit Standard-Werten...${NC}"
-    SD="2024-01-01"
+    echo -e "${YELLOW}▶ Alle Analysen 1-19 mit Standard-Werten...${NC}"
+    SD="2023-01-01"
     ED=$(date +%Y-%m-%d)
     CAP=100
-    for i in 1 4 5 6 7 8 9 10; do
+    SIMS=5000
+    WH=4
+    MIN_T=10
+
+    for i in $(seq 1 19); do
         echo ""
         echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
-        echo -e "${CYAN}  Analyse $i${NC}"
+        echo -e "${CYAN}  Analyse $i von 19${NC}"
         echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
         case "$i" in
-            1)  export ZB_START_DATE="$SD" ZB_END_DATE="$ED" ZB_CAPITAL="$CAP"
-                $PYTHON -c "
-import os,sys; sys.path.insert(0,'$SCRIPT_DIR/src')
-from zerobot.analysis.show_results import run_single_analysis
-run_single_analysis('$SD','$ED',$CAP)
-" 2>/dev/null || true ;;
-            4)  run_sweep "atr_multiplier"  "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            5)  run_sweep "trend_min_bricks" "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            6)  run_sweep "reversal_bricks"  "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            7)  run_sweep "vol_filter"        "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            8)  run_sweep "rr_ratio"          "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            9)  run_sweep "atr_sl"            "$CAP" "$SD" "$ED" 2>/dev/null || true ;;
-            10) $PYTHON - <<PYEOF 2>/dev/null || true
-import os,sys; sys.path.insert(0,'$SCRIPT_DIR/src')
-from zerobot.analysis.backtester import load_data,run_backtest
-import ta as ta_lib
-symbol='DOGE/USDT:USDT'; capital=$CAP
-for tf in ['1h','2h','4h','6h']:
-    data=load_data(symbol,tf,'$SD','$ED')
-    if data.empty: continue
-    atr=ta_lib.volatility.AverageTrueRange(high=data['high'],low=data['low'],close=data['close'],window=14)
-    data['atr']=atr.average_true_range(); data.dropna(subset=['atr'],inplace=True)
-    strat={'atr_multiplier':1.0,'trend_min_bricks':3,'reversal_bricks':2,'vol_filter_enabled':True,'min_vol_ratio':1.2}
-    risk={'risk_reward_ratio':2.0,'risk_per_trade_pct':1.0,'leverage':10,'trailing_stop_activation_rr':2.0,'trailing_stop_callback_rate_pct':1.0,'atr_multiplier_sl':2.0,'min_sl_pct':0.3}
-    r=run_backtest(data.copy(),strat,risk,capital)
-    print(f"  DOGE/{tf}: {r['trades_count']} Trades | WR {r['win_rate']:.1f}% | PnL {r['total_pnl_pct']:.1f}%")
-PYEOF
-            ;;
+            1)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/walk_forward.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            2)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/fee_impact.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            3)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/monte_carlo.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS" 2>/dev/null || true ;;
+            4)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/bootstrap_test.py" \
+                    --start-date "$SD" --end-date "$ED" --min-trades "$MIN_T" 2>/dev/null || true ;;
+            5)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+                    --param rr --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            6)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+                    --param atr_sl --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            7)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sweep_walkforward.py" \
+                    --param trailing --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            8)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_sensitivity.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            9)  $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/multitf_analysis.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" 2>/dev/null || true ;;
+            10) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/param_stability.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            11) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/correlation.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            12) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/kelly_sizing.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            13) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_analysis.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            14) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/brick_pattern.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            15) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/confluence.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" --window-hours "$WH" 2>/dev/null || true ;;
+            16) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/vol_filter.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            17) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/time_analysis.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            18) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/regime_adaptive.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
+            19) $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/drawdown_duration.py" \
+                    --start-date "$SD" --end-date "$ED" --capital "$CAP" 2>/dev/null || true ;;
         esac
     done
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Alle Analysen abgeschlossen.${NC}"
+    echo -e "${GREEN}  Alle 19 Analysen abgeschlossen.${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 else
     run_mode "$MODE"
