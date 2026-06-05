@@ -79,6 +79,12 @@ def run_single_analysis(start_date, end_date, start_capital):
                 "PnL %":      result.get('total_pnl_pct', -100),
                 "Max DD %":   result.get('max_drawdown_pct', 1.0) * 100,
                 "Endkapital": result.get('end_capital', start_capital),
+                "Renko ATR":  round(strategy_params.get('atr_multiplier', 0), 3),
+                "Hebel":      risk_params.get('leverage', '?'),
+                "SL ATR":     round(risk_params.get('atr_multiplier_sl', 0), 2),
+                "RRR":        round(risk_params.get('risk_reward_ratio', 0), 2),
+                "Trail Akt.": round(risk_params.get('trailing_stop_activation_rr', 0), 2),
+                "Trail CB%":  round(risk_params.get('trailing_stop_callback_rate_pct', 0), 2),
             })
         except Exception as e:
             print(f"--> FEHLER bei {filename}: {e}")
@@ -89,14 +95,14 @@ def run_single_analysis(start_date, end_date, start_capital):
         return
 
     results_df = pd.DataFrame(all_results).sort_values(by="PnL %", ascending=False)
-    pd.set_option('display.width', 1000)
+    pd.set_option('display.width', 1200)
     pd.set_option('display.max_columns', None)
     pd.set_option('display.float_format', '{:.2f}'.format)
-    print("\n\n" + "=" * 90)
+    print("\n\n" + "=" * 120)
     print("                       ZeroBot Renko — Einzelstrategien")
-    print("=" * 90)
+    print("=" * 120)
     print(results_df.to_string(index=False))
-    print("=" * 90)
+    print("=" * 120)
 
 
 def run_shared_mode(is_auto: bool, start_date, end_date, start_capital, target_max_dd: float):
