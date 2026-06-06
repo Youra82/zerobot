@@ -239,14 +239,15 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
             side, price = get_ear_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
 
             if side:
-                entry_price = current_candle['close']
-
-                # SL = Open des Entry-Bricks = Close des vorherigen Bricks (= 1 Brick Abstand)
+                # Entry = letzter abgeschlossener Brick dieser Candle (nicht candle['close'],
+                # da mehrere Bricks pro Candle entstehen können und candle close ≠ brick close)
                 bidx = last_brick_idx_at_candle.get(i)
                 if bidx is not None and bidx > 0:
-                    sl_price = bricks[bidx - 1]['close']
+                    entry_price = bricks[bidx]['close']        # letzter Brick-Level
+                    sl_price    = bricks[bidx - 1]['close']    # vorheriger Brick = SL (1 Brick Abstand)
                 else:
-                    sl_price = entry_price * (0.99 if side == 'buy' else 1.01)
+                    entry_price = current_candle['close']
+                    sl_price    = entry_price * (0.99 if side == 'buy' else 1.01)
 
                 sl_dist = abs(entry_price - sl_price)
                 if sl_dist <= 0:

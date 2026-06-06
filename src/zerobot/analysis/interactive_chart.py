@@ -338,16 +338,15 @@ def _generate_chart(symbol: str, timeframe: str,
             customdata=[t.get('pnl_usd', 0) for t in sl_exits],
         ), row=1, col=1, secondary_y=False)
 
-    # SL- und TP-Linien pro Trade (horizontal von Entry bis Exit)
+    # SL-Linien pro Trade (horizontal von Entry bis Exit)
     for i, t in enumerate(trades):
         ebx = _entry_bx(t)
         xbx = _exit_bx(t)
         sl  = t.get('stop_loss')
-        tp  = t.get('take_profit')
-        if sl is None or tp is None:
+        if sl is None:
             continue
         show_legend = (i == 0)
-        # SL-Linie (rot gestrichelt)
+        # SL-Linie (rot gestrichelt) — immer zeichnen (TP ist Brick-Exit, kein fester Level)
         fig.add_trace(go.Scatter(
             x=[ebx, xbx], y=[sl, sl],
             mode='lines',
@@ -356,16 +355,6 @@ def _generate_chart(symbol: str, timeframe: str,
             legendgroup='sl',
             showlegend=show_legend,
             hovertemplate=f'SL: {sl:.4f}<extra></extra>',
-        ), row=1, col=1, secondary_y=False)
-        # TP-Linie (grün gestrichelt)
-        fig.add_trace(go.Scatter(
-            x=[ebx, xbx], y=[tp, tp],
-            mode='lines',
-            line=dict(color='rgba(38,166,154,0.65)', width=1, dash='dot'),
-            name='Take-Profit',
-            legendgroup='tp',
-            showlegend=show_legend,
-            hovertemplate=f'TP: {tp:.4f}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
     # Equity-Kurve (rechte Y-Achse)
