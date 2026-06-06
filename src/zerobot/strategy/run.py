@@ -68,6 +68,13 @@ def run_for_account(account, telegram_config, params, logger):
             logger.critical("Exchange konnte nicht initialisiert werden. Breche Zyklus ab.")
             return
 
+        if symbol not in exchange.markets:
+            msg = f"ZeroBot: Symbol {symbol} nicht auf Bitget verfügbar – Strategie wird übersprungen."
+            logger.warning(msg)
+            if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
+                send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+            return
+
         full_trade_cycle(exchange, None, None, params, telegram_config, logger)
 
     except Exception as e:
