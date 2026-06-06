@@ -1,12 +1,13 @@
 # src/zerobot/analysis/backtester.py
 import os
-import pandas as pd
-import numpy as np
 import json
 import sys
-from tqdm import tqdm
-import ta
 import math
+from collections import defaultdict
+
+import pandas as pd
+import numpy as np
+import ta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
@@ -20,19 +21,14 @@ secrets_cache = None
 
 
 def load_active_configs():
-    """Load only configs whose (symbol, timeframe) has active=true in settings.json.
-    Falls back to all configs only if settings.json cannot be read at all."""
     configs_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
-
-    # Build set of (symbol, timeframe) pairs where active is true
-    active_pairs = None  # None = settings.json unreadable → fall back
+    active_pairs = None
     try:
         with open(os.path.join(PROJECT_ROOT, 'settings.json')) as f:
             s = json.load(f)
         entries = s.get('live_trading_settings', {}).get('active_strategies', [])
         active_pairs = set()
         for entry in entries:
-            # include only if active flag is missing (default true) or explicitly true
             if not entry.get('active', True):
                 continue
             sym = entry.get('symbol', '').strip()
@@ -40,7 +36,7 @@ def load_active_configs():
             if sym and tf:
                 active_pairs.add((sym, tf))
     except Exception:
-        active_pairs = None  # fall back to all configs
+        active_pairs = None
 
     result = []
     if os.path.isdir(configs_dir):
@@ -51,7 +47,6 @@ def load_active_configs():
                         cfg = json.load(f)
                     sym = cfg.get('market', {}).get('symbol', '')
                     tf  = cfg.get('market', {}).get('timeframe', '')
-                    # active_pairs=None → fallback (all); active_pairs=set → filter
                     if active_pairs is None or (sym, tf) in active_pairs:
                         result.append((fn, cfg))
                 except Exception:
@@ -84,10 +79,10 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
             data = pd.read_csv(cache_file, index_col='timestamp', parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 data.index = pd.to_datetime(data.index, utc=True)
-            data_start   = data.index.min()
-            data_end     = data.index.max()
-            req_start    = pd.to_datetime(start_date_str, utc=True)
-            req_end      = pd.to_datetime(end_date_str, utc=True)
+            data_start    = data.index.min()
+            data_end      = data.index.max()
+            req_start     = pd.to_datetime(start_date_str, utc=True)
+            req_end       = pd.to_datetime(end_date_str, utc=True)
             req_start_buf = req_start - pd.Timedelta(days=20)
             if data_start <= req_start_buf and data_end >= req_end:
                 return data.loc[req_start_buf:req_end]
@@ -121,9 +116,9 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 
         if not full_data.empty:
             full_data.to_csv(cache_file)
-            req_start_dt  = pd.to_datetime(start_date_str, utc=True)
-            req_end_dt    = pd.to_datetime(end_date_str, utc=True)
-            buffer_dt     = req_start_dt - pd.Timedelta(days=20)
+            req_start_dt = pd.to_datetime(start_date_str, utc=True)
+            req_end_dt   = pd.to_datetime(end_date_str, utc=True)
+            buffer_dt    = req_start_dt - pd.Timedelta(days=20)
             return full_data.loc[buffer_dt:req_end_dt]
         return pd.DataFrame()
     except Exception:
@@ -145,130 +140,148 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     except Exception:
         return {"total_pnl_pct": -100, "end_capital": start_capital}
 
-    # EAR Engine
+    # EAR Engine — Signale + Bricks
     engine         = EAREngine(settings=strategy_params)
     processed_data = engine.process_dataframe(data)
 
-    current_capital         = start_capital
-    peak_capital            = start_capital
-    max_drawdown_pct        = 0.0
-    trades_count            = 0
-    wins_count              = 0
-    position                = None
+    # Bricks vorberechnen (für SL = Entry-Brick-Open und TP = erster Gegenbrick)
+    bricks = engine._build_bricks(data)
+    bricks_by_candle         = defaultdict(list)
+    last_brick_idx_at_candle = {}
+    for bidx, brick in enumerate(bricks):
+        cidx = brick['candle_idx']
+        bricks_by_candle[cidx].append(brick)
+        last_brick_idx_at_candle[cidx] = bidx
 
-    risk_reward_ratio    = risk_params.get('risk_reward_ratio', 2.0)
-    risk_per_trade_pct   = risk_params.get('risk_per_trade_pct', 1.0) / 100
-    activation_rr        = risk_params.get('trailing_stop_activation_rr', 2.0)
-    leverage             = risk_params.get('leverage', 10)
-    fee_pct              = (fee_pct_override / 100) if fee_pct_override is not None else (0.06 / 100)
-    atr_multiplier_sl    = risk_params.get('atr_multiplier_sl', 2.0)
-    min_sl_pct           = risk_params.get('min_sl_pct', 0.3) / 100.0
+    current_capital  = start_capital
+    peak_capital     = start_capital
+    max_drawdown_pct = 0.0
+    trades_count     = 0
+    wins_count       = 0
+    position         = None
+
+    risk_per_trade_pct    = risk_params.get('risk_per_trade_pct', 1.0) / 100
+    leverage              = risk_params.get('leverage', 10)
+    fee_pct               = (fee_pct_override / 100) if fee_pct_override is not None else (0.06 / 100)
     absolute_max_notional = 1000000
 
-    trades_list = []
+    trades_list      = []
     params_for_logic = {"strategy": strategy_params, "risk": risk_params}
 
-    for timestamp, current_candle in processed_data.iterrows():
+    for i, (timestamp, current_candle) in enumerate(processed_data.iterrows()):
         if current_capital <= 0:
             break
 
-        # Positions-Management
+        candle_bricks = bricks_by_candle.get(i, [])
+
+        # ── Positions-Management ──────────────────────────────────────────────
         if position:
-            exit_price = None
+            exit_price  = None
+            exit_reason = None
+
+            # 1. Candle-Level SL (fester Preis = Open des Entry-Bricks)
             if position['side'] == 'long':
-                if current_candle['low']  <= position['stop_loss']:
-                    exit_price = position['stop_loss']
-                elif current_candle['high'] >= position['take_profit']:
-                    exit_price = position['take_profit']
-            elif position['side'] == 'short':
+                if current_candle['low'] <= position['stop_loss']:
+                    exit_price  = position['stop_loss']
+                    exit_reason = 'sl'
+            else:
                 if current_candle['high'] >= position['stop_loss']:
-                    exit_price = position['stop_loss']
-                elif current_candle['low']  <= position['take_profit']:
-                    exit_price = position['take_profit']
+                    exit_price  = position['stop_loss']
+                    exit_reason = 'sl'
+
+            # 2. Brick-Level TP: erster vollständiger Brick in Gegenrichtung
+            if exit_price is None:
+                for brick in candle_bricks:
+                    if position['side'] == 'long' and brick['direction'] == 'down':
+                        exit_price  = brick['close']
+                        exit_reason = 'tp'
+                        break
+                    elif position['side'] == 'short' and brick['direction'] == 'up':
+                        exit_price  = brick['close']
+                        exit_reason = 'tp'
+                        break
 
             if exit_price:
-                pnl_pct       = (exit_price / position['entry_price'] - 1) \
-                                if position['side'] == 'long' \
-                                else (1 - exit_price / position['entry_price'])
+                pnl_pct        = (exit_price / position['entry_price'] - 1) \
+                                  if position['side'] == 'long' \
+                                  else (1 - exit_price / position['entry_price'])
                 notional_value = position['notional_value']
                 pnl_usd        = notional_value * pnl_pct
                 total_fees     = notional_value * fee_pct * 2
-                current_capital += (pnl_usd - total_fees)
-                if (pnl_usd - total_fees) > 0:
+                net            = pnl_usd - total_fees
+                current_capital += net
+                if net > 0:
                     wins_count += 1
                 trades_count += 1
                 if return_trades:
-                    net = pnl_usd - total_fees
                     trades_list.append({
-                        'entry_time':  str(position.get('entry_time', '')),
-                        'exit_time':   str(timestamp),
-                        'side':        position['side'],
-                        'entry_price': position['entry_price'],
-                        'exit_price':  exit_price,
-                        'stop_loss':   position['stop_loss'],
-                        'take_profit': position['take_profit'],
-                        'pnl_usd':     round(net, 4),
-                        'win':         net > 0,
+                        'entry_time':    str(position.get('entry_time', '')),
+                        'exit_time':     str(timestamp),
+                        'side':          position['side'],
+                        'entry_price':   position['entry_price'],
+                        'exit_price':    exit_price,
+                        'stop_loss':     position['stop_loss'],
+                        'take_profit':   None,
+                        'exit_reason':   exit_reason,
+                        'pnl_usd':       round(net, 4),
+                        'win':           net > 0,
                         'capital_after': round(current_capital, 4),
                     })
-                position      = None
-                peak_capital  = max(peak_capital, current_capital)
+                position     = None
+                peak_capital = max(peak_capital, current_capital)
                 if peak_capital > 0:
                     drawdown         = (peak_capital - current_capital) / peak_capital
                     max_drawdown_pct = max(max_drawdown_pct, drawdown)
                 continue
 
-        # Einstiegs-Logik
+        # ── Einstiegs-Logik ───────────────────────────────────────────────────
         if not position and current_capital > 0:
             side, price = get_ear_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
 
             if side:
                 entry_price = current_candle['close']
-                current_atr = current_candle.get('atr', 0)
-                if current_atr <= 0:
+
+                # SL = Open des Entry-Bricks = Close des vorherigen Bricks (= 1 Brick Abstand)
+                bidx = last_brick_idx_at_candle.get(i)
+                if bidx is not None and bidx > 0:
+                    sl_price = bricks[bidx - 1]['close']
+                else:
+                    sl_price = entry_price * (0.99 if side == 'buy' else 1.01)
+
+                sl_dist = abs(entry_price - sl_price)
+                if sl_dist <= 0:
                     continue
 
-                sl_dist      = max(current_atr * atr_multiplier_sl, entry_price * min_sl_pct)
-                risk_amount  = current_capital * risk_per_trade_pct
-                sl_pct       = sl_dist / entry_price
-                if sl_pct <= 0:
-                    continue
-
-                calc_notional = risk_amount / sl_pct
-                max_notional  = current_capital * 10
+                risk_amount    = current_capital * risk_per_trade_pct
+                sl_pct         = sl_dist / entry_price
+                calc_notional  = risk_amount / sl_pct
+                max_notional   = current_capital * leverage
                 final_notional = min(calc_notional, max_notional, absolute_max_notional)
 
                 margin_needed = final_notional / leverage
                 if margin_needed > current_capital:
                     continue
 
-                if side == 'buy':
-                    sl  = entry_price - sl_dist
-                    tp  = entry_price + sl_dist * risk_reward_ratio
-                else:
-                    sl  = entry_price + sl_dist
-                    tp  = entry_price - sl_dist * risk_reward_ratio
-
                 position = {
                     'side':           'long' if side == 'buy' else 'short',
                     'entry_price':    entry_price,
-                    'stop_loss':      sl,
-                    'take_profit':    tp,
+                    'stop_loss':      sl_price,
+                    'take_profit':    None,
                     'margin_used':    margin_needed,
                     'notional_value': final_notional,
                     'entry_time':     timestamp,
                 }
 
     win_rate      = (wins_count / trades_count * 100) if trades_count > 0 else 0
-    final_pnl_pct = ((current_capital - start_capital) / start_capital) * 100 if start_capital > 0 else 0
+    final_pnl_pct = ((current_capital - start_capital) / start_capital) * 100
     final_capital = max(0, current_capital)
 
     result = {
-        "total_pnl_pct":   final_pnl_pct,
-        "trades_count":    trades_count,
-        "win_rate":        win_rate,
+        "total_pnl_pct":    final_pnl_pct,
+        "trades_count":     trades_count,
+        "win_rate":         win_rate,
         "max_drawdown_pct": max_drawdown_pct,
-        "end_capital":     final_capital,
+        "end_capital":      final_capital,
     }
     if return_trades:
         result['trades'] = trades_list

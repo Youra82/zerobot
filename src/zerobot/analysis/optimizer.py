@@ -60,13 +60,8 @@ def objective(trial):
         'htf':              CURRENT_HTF,
     }
     risk_params = {
-        'risk_reward_ratio':               trial.suggest_float('risk_reward_ratio',          1.5, 5.0),
-        'risk_per_trade_pct':              trial.suggest_float('risk_per_trade_pct',          0.5, 3.0),
-        'leverage':                        trial.suggest_int(  'leverage',                    5,   20),
-        'trailing_stop_activation_rr':     trial.suggest_float('trailing_stop_activation_rr', 1.0, 3.0),
-        'trailing_stop_callback_rate_pct': trial.suggest_float('trailing_stop_callback_rate_pct', 0.2, 2.0),
-        'atr_multiplier_sl':               trial.suggest_float('atr_multiplier_sl',           1.5, 5.0),
-        'min_sl_pct': 0.3,
+        'risk_per_trade_pct': trial.suggest_float('risk_per_trade_pct', 0.5, 3.0),
+        'leverage':           trial.suggest_int(  'leverage',           5,   20),
     }
 
     result   = run_backtest(HISTORICAL_DATA.copy(), strategy_params, risk_params, START_CAPITAL, verbose=False)
@@ -218,14 +213,9 @@ def main():
             'trend_min_bricks': int(  best_params.get('trend_min_bricks', FIXED_TREND_MIN_BRICKS or 3)),
         }
         risk_config = {
-            'margin_mode':                     "isolated",
-            'risk_per_trade_pct':              round(best_params['risk_per_trade_pct'],              2),
-            'risk_reward_ratio':               round(best_params['risk_reward_ratio'],               2),
-            'leverage':                        best_params['leverage'],
-            'trailing_stop_activation_rr':     round(best_params['trailing_stop_activation_rr'],     2),
-            'trailing_stop_callback_rate_pct': round(best_params['trailing_stop_callback_rate_pct'], 2),
-            'atr_multiplier_sl':               round(best_params['atr_multiplier_sl'],               2),
-            'min_sl_pct':                      0.3,
+            'margin_mode':        "isolated",
+            'risk_per_trade_pct': round(best_params['risk_per_trade_pct'], 2),
+            'leverage':           best_params['leverage'],
         }
         behavior_config = {"use_longs": True, "use_shorts": True}
 

@@ -33,8 +33,8 @@ def determine_market_bias(htf_df):
     if htf_df is None or htf_df.empty or len(htf_df) < 50:
         return Bias.NEUTRAL
     try:
-        ema_fast = htf_df['close'].ewm(span=20, adjust=False).mean()
-        ema_slow = htf_df['close'].ewm(span=50, adjust=False).mean()
+        ema_fast     = htf_df['close'].ewm(span=20, adjust=False).mean()
+        ema_slow     = htf_df['close'].ewm(span=50, adjust=False).mean()
         current_fast = ema_fast.iloc[-1]
         current_slow = ema_slow.iloc[-1]
         distance_pct = abs(current_fast - current_slow) / current_slow
@@ -101,9 +101,115 @@ def housekeeper_routine(exchange, symbol, logger):
         return False
 
 
-def check_and_open_new_position(exchange, model, scaler, params, telegram_config, logger):
+def _close_position(exchange, symbol, pos_info, params, telegram_config, logger, reason='brick_reversal'):
+    """Schließt eine offene Position per Market Order."""
+    try:
+        contracts  = float(pos_info.get('contracts', 0))
+        pos_side   = pos_info.get('side', '').lower()
+        close_side = 'sell' if pos_side == 'long' else 'buy'
+
+        exchange.cancel_all_orders_for_symbol(symbol)
+        time.sleep(1)
+
+        if contracts <= 0:
+            logger.warning(f"_close_position: contracts={contracts}, überspringe.")
+            return
+
+        exchange.create_market_order(symbol, close_side, contracts, {'reduceOnly': True})
+        logger.info(f"Position geschlossen ({reason}): {pos_side.upper()} {contracts} {symbol}")
+
+        if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
+            try:
+                ticker     = exchange.fetch_ticker(symbol)
+                exit_price = ticker['last']
+                tf         = params['market']['timeframe']
+                msg = (
+                    f"ZEROBOT (EAR) – Position geschlossen\n"
+                    f"- Symbol: {symbol} ({tf})\n"
+                    f"- Seite: {pos_side.upper()}\n"
+                    f"- Exit: ${exit_price:.6f}\n"
+                    f"- Grund: {reason}"
+                )
+                send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Fehler beim Schließen der Position: {e}", exc_info=True)
+
+
+def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_config, logger):
+    """
+    Prüft ob ein EAR-Brick in Gegenrichtung entstanden ist (seit Trade-Eröffnung).
+    Falls ja → Position per Market Order schließen (Brick-TP-Exit).
+    """
     symbol          = params['market']['symbol']
     timeframe       = params['market']['timeframe']
+    symbol_timeframe = f"{symbol.replace('/', '-')}_{timeframe}"
+    pos_side        = pos_info.get('side', '').lower()  # 'long' or 'short'
+
+    try:
+        recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=500)
+        if recent_data.empty or len(recent_data) < 20:
+            logger.warning("Nicht genug Daten für Brick-Reversal-Check.")
+            return
+
+        strat_params  = params.get('strategy', {})
+        atr_indicator = ta.volatility.AverageTrueRange(
+            high=recent_data['high'], low=recent_data['low'],
+            close=recent_data['close'], window=14)
+        recent_data['atr'] = atr_indicator.average_true_range()
+        recent_data.dropna(subset=['atr'], inplace=True)
+
+        engine = EAREngine(settings=strat_params)
+        bricks = engine._build_bricks(recent_data)
+        if not bricks:
+            logger.info("Keine Bricks berechnet – Position hält.")
+            return
+
+        # Entry-Zeitpunkt aus trade_lock lesen
+        trade_lock      = load_or_create_trade_lock()
+        entry_time_str  = trade_lock.get(f"{symbol_timeframe}_entry_time")
+        entry_time      = None
+        if entry_time_str:
+            try:
+                entry_time = pd.to_datetime(entry_time_str, utc=True)
+            except Exception:
+                pass
+
+        # Nur Bricks NACH dem Entry betrachten
+        if entry_time is not None:
+            post_entry_bricks = [
+                b for b in bricks
+                if b['candle_idx'] < len(recent_data)
+                and recent_data.index[b['candle_idx']] > entry_time
+            ]
+        else:
+            post_entry_bricks = bricks[-10:]  # Fallback: letzte 10 Bricks
+
+        if not post_entry_bricks:
+            logger.info("Noch keine neuen Bricks seit Entry – Position hält.")
+            return
+
+        # Prüfe ob Gegenbrick vorhanden
+        for brick in post_entry_bricks:
+            if pos_side == 'long' and brick['direction'] == 'down':
+                logger.info(f"Brick-Reversal: DOWN-Brick nach Long-Entry → schließe Position.")
+                _close_position(exchange, symbol, pos_info, params, telegram_config, logger, 'brick_reversal_down')
+                return
+            elif pos_side == 'short' and brick['direction'] == 'up':
+                logger.info(f"Brick-Reversal: UP-Brick nach Short-Entry → schließe Position.")
+                _close_position(exchange, symbol, pos_info, params, telegram_config, logger, 'brick_reversal_up')
+                return
+
+        logger.info(f"Kein Gegenbrick seit Entry ({entry_time_str}) – Position hält ({pos_side}).")
+
+    except Exception as e:
+        logger.error(f"Fehler bei Brick-Reversal-Check: {e}", exc_info=True)
+
+
+def check_and_open_new_position(exchange, model, scaler, params, telegram_config, logger):
+    symbol           = params['market']['symbol']
+    timeframe        = params['market']['timeframe']
     symbol_timeframe = f"{symbol.replace('/', '-')}_{timeframe}"
 
     if is_trade_locked(symbol_timeframe):
@@ -124,10 +230,11 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             high=recent_data['high'], low=recent_data['low'],
             close=recent_data['close'], window=14)
         recent_data['atr'] = atr_indicator.average_true_range()
+        recent_data.dropna(subset=['atr'], inplace=True)
 
         # MTF Bias
-        htf          = params['market'].get('htf')
-        market_bias  = Bias.NEUTRAL
+        htf         = params['market'].get('htf')
+        market_bias = Bias.NEUTRAL
         if htf:
             try:
                 htf_data = exchange.fetch_recent_ohlcv(symbol, htf, limit=100)
@@ -149,8 +256,8 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             return
 
         # Re-Entry-Schutz
-        last_entry_key = f"{symbol_timeframe}_last_entry_price"
-        trade_lock     = load_or_create_trade_lock()
+        last_entry_key   = f"{symbol_timeframe}_last_entry_price"
+        trade_lock       = load_or_create_trade_lock()
         last_entry_price = trade_lock.get(last_entry_key)
         if last_entry_price:
             try:
@@ -168,9 +275,9 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             return
 
         # Risk Management
-        risk_params  = params.get('risk', {})
-        leverage     = risk_params.get('leverage', 10)
-        margin_mode  = risk_params.get('margin_mode', 'isolated')
+        risk_params = params.get('risk', {})
+        leverage    = risk_params.get('leverage', 10)
+        margin_mode = risk_params.get('margin_mode', 'isolated')
 
         exchange.set_margin_mode(symbol, margin_mode)
         exchange.set_leverage(symbol, leverage)
@@ -183,57 +290,42 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         ticker      = exchange.fetch_ticker(symbol)
         entry_price = signal_price or ticker['last']
 
-        base_rr            = risk_params.get('risk_reward_ratio', 2.0)
-        risk_pct           = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
-        risk_usdt          = balance * risk_pct
-        atr_multiplier_sl  = risk_params.get('atr_multiplier_sl', 2.0)
-        min_sl_pct         = risk_params.get('min_sl_pct', 0.3) / 100.0
-
-        current_atr = current_candle.get('atr')
-
-        # Adaptive RR
-        if not pd.isna(current_atr) and current_atr > 0:
-            atr_avg = processed_data['atr'].tail(50).mean()
-            if current_atr > atr_avg * 1.5:
-                rr = min(base_rr * 1.3, 5.0)
-                logger.info(f"High Vol – RR erhöht auf {rr:.2f}")
-            elif current_atr < atr_avg * 0.7:
-                rr = max(base_rr * 0.8, 1.5)
-                logger.info(f"Low Vol – RR gesenkt auf {rr:.2f}")
-            else:
-                rr = base_rr
+        # SL = Open des Entry-Bricks (= Close des vorherigen Bricks = 1 Brick-Abstand)
+        bricks = engine._build_bricks(recent_data)
+        if bricks and len(bricks) > 1:
+            sl_price = bricks[-2]['close']  # vorheriges Brick-Level
         else:
-            rr = base_rr
+            sl_price = entry_price * (0.99 if signal_side == 'buy' else 1.01)
 
-        if pd.isna(current_atr) or current_atr <= 0:
-            sl_distance = entry_price * min_sl_pct
-        else:
-            sl_distance = max(current_atr * atr_multiplier_sl, entry_price * min_sl_pct)
-
-        if sl_distance <= 0:
+        sl_dist = abs(entry_price - sl_price)
+        if sl_dist <= 0:
+            logger.error("SL-Abstand = 0, überspringe.")
             return
 
-        if signal_side == 'buy':
-            sl_price  = entry_price - sl_distance
-            tp_price  = entry_price + sl_distance * rr
-            pos_side  = 'buy'
-            tsl_side  = 'sell'
-        else:
-            sl_price  = entry_price + sl_distance
-            tp_price  = entry_price - sl_distance * rr
-            pos_side  = 'sell'
-            tsl_side  = 'buy'
-
-        sl_pct_equiv      = sl_distance / entry_price
-        calc_notional     = risk_usdt / sl_pct_equiv
-        amount            = calc_notional / entry_price
+        risk_pct       = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
+        risk_usdt      = balance * risk_pct
+        sl_pct_equiv   = sl_dist / entry_price
+        calc_notional  = risk_usdt / sl_pct_equiv
+        amount         = calc_notional / entry_price
 
         min_amount = exchange.markets[symbol].get('limits', {}).get('amount', {}).get('min', 0.0)
         if amount < min_amount:
             logger.error(f"Ordergröße {amount} < Mindestbetrag {min_amount}.")
             return
 
-        logger.info(f"Eröffne {pos_side.upper()}-Position: {amount:.6f} @ ${entry_price:.6f} | Risk: {risk_usdt:.2f} USDT")
+        if signal_side == 'buy':
+            pos_side  = 'buy'
+            tsl_side  = 'sell'
+        else:
+            pos_side  = 'sell'
+            tsl_side  = 'buy'
+
+        sl_rounded = float(exchange.exchange.price_to_precision(symbol, sl_price))
+
+        logger.info(
+            f"Eröffne {pos_side.upper()}-Position: {amount:.6f} @ ${entry_price:.6f} | "
+            f"SL: ${sl_rounded:.6f} ({sl_dist/entry_price*100:.3f}%) | Risk: {risk_usdt:.2f} USDT"
+        )
 
         entry_order = exchange.create_market_order(
             symbol, pos_side, amount,
@@ -250,21 +342,15 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         pos_info  = position[0]
         contracts = float(pos_info['contracts'])
 
-        sl_rounded = float(exchange.exchange.price_to_precision(symbol, sl_price))
-        tp_rounded = float(exchange.exchange.price_to_precision(symbol, tp_price))
+        # Nur SL-Order auf der Börse platzieren — TP wird durch Brick-Reversal-Check ausgelöst
         exchange.place_trigger_market_order(symbol, tsl_side, contracts, sl_rounded, {'reduceOnly': True})
 
-        act_rr        = risk_params.get('trailing_stop_activation_rr', 1.5)
-        callback_pct  = risk_params.get('trailing_stop_callback_rate_pct', 0.5) / 100.0
-
-        act_price = (entry_price + sl_distance * act_rr) if pos_side == 'buy' \
-                    else (entry_price - sl_distance * act_rr)
-        exchange.place_trailing_stop_order(symbol, tsl_side, contracts, act_price, callback_pct, {'reduceOnly': True})
-
+        # Entry-Zeit und Seite für Brick-Reversal-Check speichern
         set_trade_lock(symbol_timeframe)
-
         trade_lock = load_or_create_trade_lock()
         trade_lock[f"{symbol_timeframe}_last_entry_price"] = entry_price
+        trade_lock[f"{symbol_timeframe}_entry_time"]       = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        trade_lock[f"{symbol_timeframe}_entry_side"]       = 'long' if signal_side == 'buy' else 'short'
         save_trade_lock(trade_lock)
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
@@ -272,12 +358,12 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
                 f"ZEROBOT (EAR): {symbol} ({timeframe})\n"
                 f"- Richtung: {pos_side.upper()}\n"
                 f"- Entry: ${entry_price:.6f}\n"
-                f"- SL: ${sl_rounded:.6f}\n"
-                f"- TP: ${tp_rounded:.6f}"
+                f"- SL: ${sl_rounded:.6f} (Brick-Open, {sl_dist/entry_price*100:.3f}%)\n"
+                f"- TP: erster Gegenbrick (dynamisch)"
             )
             send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
 
-        logger.info("Trade-Eröffnung erfolgreich abgeschlossen.")
+        logger.info("Trade-Eröffnung erfolgreich. TP via Brick-Reversal-Check.")
 
     except ccxt.InsufficientFunds as e:
         logger.error(f"InsufficientFunds: {e}")
@@ -291,7 +377,8 @@ def full_trade_cycle(exchange, model, scaler, params, telegram_config, logger):
     try:
         pos = exchange.fetch_open_positions(symbol)
         if pos:
-            logger.info(f"Position offen – Management via SL/TP/TSL.")
+            # Position offen: SL liegt auf der Börse, TP via Brick-Reversal prüfen
+            check_and_close_on_brick_reversal(exchange, pos[0], params, telegram_config, logger)
         else:
             housekeeper_routine(exchange, symbol, logger)
             check_and_open_new_position(exchange, model, scaler, params, telegram_config, logger)

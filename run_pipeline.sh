@@ -29,7 +29,7 @@ $PYTHON -c "import ta" 2>/dev/null || {
 echo ""
 echo "======================================================="
 echo "       ZeroBot EAR Optimierungs-Pipeline"
-echo "  (Entropy-Adaptive Renko + Entropy Squeeze Signal)"
+echo "  (Entropy-Adaptive Renko + N-Brick Trend Signal)"
 echo "======================================================="
 echo ""
 
