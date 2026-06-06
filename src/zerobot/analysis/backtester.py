@@ -12,8 +12,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.utils.exchange import Exchange
-from zerobot.strategy.renko_engine import RenkoEngine
-from zerobot.strategy.renko_logic import get_renko_signal
+from zerobot.strategy.ear_engine import EAREngine
+from zerobot.strategy.ear_logic import get_ear_signal
 from zerobot.utils.timeframe_utils import determine_htf
 
 secrets_cache = None
@@ -145,8 +145,8 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     except Exception:
         return {"total_pnl_pct": -100, "end_capital": start_capital}
 
-    # Renko Engine
-    engine         = RenkoEngine(settings=strategy_params)
+    # EAR Engine
+    engine         = EAREngine(settings=strategy_params)
     processed_data = engine.process_dataframe(data)
 
     current_capital         = start_capital
@@ -220,7 +220,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
 
         # Einstiegs-Logik
         if not position and current_capital > 0:
-            side, price = get_renko_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
+            side, price = get_ear_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
 
             if side:
                 entry_price = current_candle['close']

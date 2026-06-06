@@ -30,7 +30,7 @@ done
 
 echo ""
 echo "======================================================="
-echo -e "  ${BOLD}ZeroBot — Renko Wissenschaftliche Analysen${NC}"
+echo -e "  ${BOLD}ZeroBot — EAR Wissenschaftliche Analysen${NC}"
 echo "======================================================="
 echo ""
 echo -e "  ${CYAN}── Prioritaet 1: Fundament ─────────────────────────${NC}"
@@ -60,11 +60,11 @@ echo "  17) Tageszeit-Analyse"
 echo "  18) Regime-adaptive Parameter"
 echo "  19) Drawdown Duration Analysis"
 echo ""
-echo -e "  ${CYAN}── Renko-Schnell-Sweeps ────────────────────────────${NC}"
-echo "  20) Brick-Groessen-Sweep     (ATR-Multiplier 0.5-2.5)"
-echo "  21) Trend-Laengen-Sweep      (trend_min_bricks 2-6)"
-echo "  22) Reversal-Bricks-Sweep    (reversal_bricks 1-4)"
-echo "  23) Volumen-Filter Vergleich"
+echo -e "  ${CYAN}── EAR-Schnell-Sweeps ──────────────────────────────${NC}"
+echo "  20) base_pct-Sweep           (Basis-Brick-Groesse 0.002-0.010)"
+echo "  21) chaos_h_min-Sweep        (Chaos-Schwelle 0.50-0.80)"
+echo "  22) chaos_min_n-Sweep        (Chaos-Bricks-Anzahl 2-8)"
+echo "  23) squeeze_ratio-Sweep      (Squeeze-Faktor 0.75-0.98)"
 echo "  24) Timeframe-Vergleich"
 echo ""
 echo "   0) Alle 1-19 Analysen nacheinander"
@@ -142,18 +142,19 @@ data.dropna(subset=['atr'], inplace=True)
 
 base_strat = dict(config.get('strategy', {}))
 
-if sweep_type == 'atr_multiplier':
-    values = [0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 1.8, 2.0, 2.5]
-    param_name = 'atr_multiplier'
-elif sweep_type == 'trend_min_bricks':
-    values = [2, 3, 4, 5, 6]
-    param_name = 'trend_min_bricks'
-elif sweep_type == 'reversal_bricks':
-    values = [1, 2, 3, 4]
-    param_name = 'reversal_bricks'
-elif sweep_type == 'vol_filter':
-    values = [True, False]
-    param_name = 'vol_filter_enabled'
+# EAR-Parameter-Sweeps
+if sweep_type == 'base_pct':
+    values = [0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.010]
+    param_name = 'base_pct'
+elif sweep_type == 'chaos_h_min':
+    values = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
+    param_name = 'chaos_h_min'
+elif sweep_type == 'chaos_min_n':
+    values = [2, 3, 4, 5, 6, 7, 8]
+    param_name = 'chaos_min_n'
+elif sweep_type == 'squeeze_ratio':
+    values = [0.75, 0.80, 0.85, 0.88, 0.90, 0.92, 0.95, 0.98]
+    param_name = 'squeeze_ratio'
 elif sweep_type == 'rr_ratio':
     values = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
     param_name = 'rr_ratio'
@@ -169,7 +170,7 @@ all_pnls = []
 for val in values:
     strat = dict(base_strat)
     r = dict(risk)
-    if param_name in ('atr_multiplier','trend_min_bricks','reversal_bricks','vol_filter_enabled'):
+    if param_name in ('base_pct','chaos_h_min','chaos_min_n','squeeze_ratio'):
         strat[param_name] = val
     elif param_name == 'rr_ratio':
         r['risk_reward_ratio'] = val
@@ -183,7 +184,7 @@ best_pnl = max(all_pnls) if all_pnls else 0
 for idx, val in enumerate(values):
     strat = dict(base_strat)
     r = dict(risk)
-    if param_name in ('atr_multiplier','trend_min_bricks','reversal_bricks','vol_filter_enabled'):
+    if param_name in ('base_pct','chaos_h_min','chaos_min_n','squeeze_ratio'):
         strat[param_name] = val
     elif param_name == 'rr_ratio':
         r['risk_reward_ratio'] = val
@@ -396,28 +397,28 @@ run_mode() {
             --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
         ;;
 
-    20) echo -e "${GREEN}▶ Brick-Groessen-Sweep (ATR-Multiplier 0.5-2.5)${NC}"
+    20) echo -e "${GREEN}▶ base_pct-Sweep (Basis-Brick-Groesse 0.002-0.010)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "atr_multiplier" "$CAP" "$SD" "$ED"
+        run_sweep "base_pct" "$CAP" "$SD" "$ED"
         ;;
 
-    21) echo -e "${GREEN}▶ Trend-Laengen-Sweep (trend_min_bricks 2-6)${NC}"
+    21) echo -e "${GREEN}▶ chaos_h_min-Sweep (Chaos-Schwelle 0.50-0.80)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "trend_min_bricks" "$CAP" "$SD" "$ED"
+        run_sweep "chaos_h_min" "$CAP" "$SD" "$ED"
         ;;
 
-    22) echo -e "${GREEN}▶ Reversal-Bricks-Sweep (1-4 Bricks)${NC}"
+    22) echo -e "${GREEN}▶ chaos_min_n-Sweep (Chaos-Bricks-Anzahl 2-8)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "reversal_bricks" "$CAP" "$SD" "$ED"
+        run_sweep "chaos_min_n" "$CAP" "$SD" "$ED"
         ;;
 
-    23) echo -e "${GREEN}▶ Volumen-Filter Vergleich${NC}"
+    23) echo -e "${GREEN}▶ squeeze_ratio-Sweep (Squeeze-Faktor 0.75-0.98)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "vol_filter" "$CAP" "$SD" "$ED"
+        run_sweep "squeeze_ratio" "$CAP" "$SD" "$ED"
         ;;
 
     24) echo -e "${GREEN}▶ Timeframe-Vergleich${NC}"
@@ -453,8 +454,8 @@ for tf in tfs:
         high=data['high'], low=data['low'], close=data['close'], window=14)
     data['atr'] = atr_ind.average_true_range()
     data.dropna(subset=['atr'], inplace=True)
-    strat = {'atr_multiplier': 1.0, 'trend_min_bricks': 3, 'reversal_bricks': 2,
-             'vol_filter_enabled': True, 'min_vol_ratio': 1.2}
+    strat = {'base_pct': 0.004, 'k_entropy': 0.8, 'h_window': 10,
+             'chaos_h_min': 0.65, 'chaos_min_n': 4, 'squeeze_ratio': 0.92}
     risk  = {'risk_reward_ratio': 2.0, 'risk_per_trade_pct': 1.0, 'leverage': 10,
              'trailing_stop_activation_rr': 2.0, 'trailing_stop_callback_rate_pct': 1.0,
              'atr_multiplier_sl': 2.0, 'min_sl_pct': 0.3}

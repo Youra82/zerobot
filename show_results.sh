@@ -1,5 +1,5 @@
 #!/bin/bash
-# show_results.sh — ZeroBot Renko Ergebnisanzeige
+# show_results.sh — ZeroBot EAR Ergebnisanzeige
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

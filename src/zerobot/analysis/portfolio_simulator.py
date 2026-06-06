@@ -11,8 +11,8 @@ import json
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.strategy.renko_engine import RenkoEngine
-from zerobot.strategy.renko_logic import get_renko_signal
+from zerobot.strategy.ear_engine import EAREngine
+from zerobot.strategy.ear_logic import get_ear_signal
 from zerobot.analysis.backtester import load_data
 
 
@@ -46,10 +46,10 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
                 high=df['high'], low=df['low'], close=df['close'], window=14)
             df['atr'] = atr_indicator.average_true_range()
 
-            engine = RenkoEngine(settings=params)
+            engine = EAREngine(settings=params)
             df     = engine.process_dataframe(df)
 
-            df.dropna(subset=['atr', 'renko_signal'], inplace=True)
+            df.dropna(subset=['atr'], inplace=True)
             if df.empty:
                 continue
 
@@ -162,7 +162,7 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
 
                 current_candle   = strat['data'].loc[ts]
                 params_for_logic = {"strategy": strat['params'], "risk": strat['risk_params']}
-                side, price      = get_renko_signal(strat['data'], current_candle, params_for_logic, Bias.NEUTRAL)
+                side, price      = get_ear_signal(strat['data'], current_candle, params_for_logic, Bias.NEUTRAL)
 
                 if side:
                     risk_params  = strat['risk_params']

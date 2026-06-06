@@ -61,7 +61,7 @@ def run_for_account(account, telegram_config, params, logger):
         symbol    = params['market']['symbol']
         timeframe = params['market']['timeframe']
         htf       = params['market']['htf']
-        logger.info(f"--- Starte ZeroBot (Renko) für {symbol} ({timeframe}) mit MTF-Bias von {htf} ---")
+        logger.info(f"--- Starte ZeroBot (EAR) für {symbol} ({timeframe}) mit MTF-Bias von {htf} ---")
 
         exchange = Exchange(account)
         if not exchange.markets:

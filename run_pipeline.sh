@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_pipeline.sh — ZeroBot Renko Optimierungs-Pipeline
+# run_pipeline.sh — ZeroBot EAR Optimierungs-Pipeline
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -26,23 +26,10 @@ $PYTHON -c "import ta" 2>/dev/null || {
     echo -e "${GREEN}✔ Pakete installiert.${NC}"
 }
 
-# ── Empfohlene Brick-Größen (ATR-Multiplier) pro Coin ────────────────────────
-declare -A BRICK_DEFAULTS
-BRICK_DEFAULTS["BTC"]="0.8"
-BRICK_DEFAULTS["ETH"]="0.9"
-BRICK_DEFAULTS["SOL"]="1.1"
-BRICK_DEFAULTS["DOGE"]="1.2"
-BRICK_DEFAULTS["XRP"]="1.1"
-BRICK_DEFAULTS["ADA"]="1.1"
-BRICK_DEFAULTS["BNB"]="0.9"
-BRICK_DEFAULTS["MATIC"]="1.2"
-BRICK_DEFAULTS["AVAX"]="1.0"
-BRICK_DEFAULTS["LINK"]="1.0"
-BRICK_DEFAULTS["DEFAULT"]="1.0"
-
 echo ""
 echo "======================================================="
-echo "       ZeroBot Renko Optimierungs-Pipeline"
+echo "       ZeroBot EAR Optimierungs-Pipeline"
+echo "  (Entropy-Adaptive Renko + Entropy Squeeze Signal)"
 echo "======================================================="
 echo ""
 
@@ -66,7 +53,7 @@ fi
 # ── Coins und Timeframes ──────────────────────────────────────────────────────
 echo ""
 read -p "Handelspaar(e) eingeben (ohne /USDT, z.B. BTC ETH DOGE) [leer=auto aus settings.json]: " COINS_INPUT
-read -p "Zeitfenster eingeben (z.B. 4h 1h 6h) [leer=auto aus settings.json]: " TF_INPUT
+read -p "Zeitfenster eingeben (z.B. 1h 4h) [leer=auto aus settings.json]: " TF_INPUT
 COINS_INPUT="${COINS_INPUT//[$'\r\n']/}"
 TF_INPUT="${TF_INPUT//[$'\r\n']/}"
 
@@ -85,7 +72,7 @@ try:
     auto_tfs   = list(dict.fromkeys(x['timeframe'] for x in active if x.get('timeframe')))
 except Exception:
     auto_coins = ['DOGE/USDT:USDT']
-    auto_tfs   = ['4h']
+    auto_tfs   = ['1h']
 
 def to_symbol(c):
     c = c.strip().upper()
@@ -105,10 +92,10 @@ echo "--- Empfehlung: Optimaler Rückblick-Zeitraum ---"
 printf "+-------------+--------------------------------+\n"
 printf "| %-11s | %-30s |\n" "Zeitfenster" "Empfohlener Rückblick (Tage)"
 printf "+-------------+--------------------------------+\n"
-printf "| %-11s | %-30s |\n" "5m, 15m"  "60 - 180 Tage"
-printf "| %-11s | %-30s |\n" "30m, 1h"  "180 - 365 Tage"
-printf "| %-11s | %-30s |\n" "2h, 4h"   "550 - 730 Tage"
-printf "| %-11s | %-30s |\n" "6h, 1d"   "1095 - 1825 Tage"
+printf "| %-11s | %-30s |\n" "15m, 30m"  "90 - 180 Tage"
+printf "| %-11s | %-30s |\n" "1h"        "365 - 548 Tage"
+printf "| %-11s | %-30s |\n" "4h"        "730 - 1095 Tage"
+printf "| %-11s | %-30s |\n" "1d"        "1460 - 1825 Tage"
 printf "+-------------+--------------------------------+\n"
 echo ""
 
@@ -122,20 +109,18 @@ if [[ -z "$START_INPUT" || "$START_INPUT" == "a" ]]; then
     START_INPUT=$($PYTHON - <<PYEOF2
 from datetime import datetime, timedelta
 pairs = """$PAIRS"""
-lookback_map = {'5m':120,'15m':120,'30m':365,'1h':365,'2h':730,'4h':730,'6h':1095,'1d':1825}
+lookback_map = {'15m':180,'30m':180,'1h':548,'2h':730,'4h':1095,'6h':1095,'1d':1825}
 tfs = set()
 for line in pairs.strip().split('\n'):
     parts = line.strip().split()
     if len(parts) == 2:
         tfs.add(parts[1])
-days = max((lookback_map.get(tf, 730) for tf in tfs), default=730)
+days = max((lookback_map.get(tf, 548) for tf in tfs), default=548)
 print((datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d'))
 PYEOF2
     )
     while IFS=' ' read -r sym tf; do
-        echo -e "${CYAN}INFO: Automatisches Startdatum für $tf ($(
-            case $tf in 4h) echo "730 Tage";; 6h) echo "1095 Tage";; 1h) echo "365 Tage";; *) echo "auto";; esac
-        ) Rückblick) gesetzt auf: $START_INPUT${NC}"
+        echo -e "${CYAN}INFO: Automatisches Startdatum fuer $tf gesetzt auf: $START_INPUT${NC}"
         break
     done <<< "$PAIRS"
 fi
@@ -159,7 +144,7 @@ if ! [[ "$TRIALS_INPUT" =~ ^[0-9]+$ ]]; then TRIALS_INPUT=200; fi
 
 echo ""
 echo "Wähle einen Optimierungs-Modus:"
-echo "  1) Strenger Modus   (Profitabel + WR >= Min. Win-Rate + MaxDD <= Limit)"
+echo "  1) Strenger Modus    (Profitabel + WR >= Min. Win-Rate + MaxDD <= Limit)"
 echo "  2) Best-Profit-Modus (Nur MaxDD-Limit, maximiert PnL)"
 read -p "Auswahl (1-2) [Standard: 1]: " MODE_INPUT
 MODE_INPUT="${MODE_INPUT//[$'\r\n ']/}"
@@ -173,78 +158,45 @@ read -p "Min. Win-Rate % [Standard: 45]: " WR_INPUT
 WR_INPUT="${WR_INPUT//[$'\r\n ']/}"
 if ! [[ "$WR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WR_INPUT=45; fi
 
-# ── Renko Strategie-Parameter (optional fixieren) ─────────────────────────────
+# ── EAR Strategie-Parameter (optional fixieren) ───────────────────────────────
 echo ""
-echo "--- Renko Strategie-Parameter ---"
+echo "--- EAR Signal-Parameter ---"
 echo ""
 echo "  Was Optuna optimiert wenn du leer lässt:"
-printf "  %-22s %s\n" "atr_multiplier"   "Brick-Größe = ATR × X          (0.5–3.0)"
-printf "  %-22s %s\n" "trend_min_bricks" "Mindest-Bricks für Trend       (2–6)"
-printf "  %-22s %s\n" "reversal_bricks"  "Bricks für Reversal-Signal     (1–3)"
-printf "  %-22s %s\n" "vol_filter"       "Volumen-Bestätigung ja/nein    (auto)"
+printf "  %-22s %s\n" "base_pct"      "Basis-Brick-Größe in % des Preises   (0.002–0.010)"
+printf "  %-22s %s\n" "k_entropy"     "Entropie-Gewichtung der Brick-Size   (0.4–1.5)"
+printf "  %-22s %s\n" "h_window"      "Glättungs-Fenster für Entropie       (5–20)"
+printf "  %-22s %s\n" "chaos_h_min"   "Min-Entropie für Chaos-Brick         (0.55–0.80)"
+printf "  %-22s %s\n" "chaos_min_n"   "Mindest-Chaos-Bricks vor Squeeze     (3–7)"
+printf "  %-22s %s\n" "squeeze_ratio" "Squeeze-Schwelle (H < avg×ratio)     (0.80–0.98)"
 echo ""
 echo "  Zahl/Wert eingeben → wird fixiert | leer → Optuna optimiert frei"
 echo ""
 
-# ATR-Multiplier pro Pair
-declare -A PAIR_ATR_OVERRIDES
-while IFS=' ' read -r sym tf; do
-    COIN=$(echo "$sym" | cut -d'/' -f1)
-    DEFAULT_ATR="${BRICK_DEFAULTS[$COIN]:-${BRICK_DEFAULTS[DEFAULT]}}"
-    read -p "  ATR-Multiplier für $COIN/$tf [Empfehlung: $DEFAULT_ATR, leer=Optuna frei]: " ATR_INPUT
-    ATR_INPUT="${ATR_INPUT//[$'\r\n ']/}"
-    PAIR_KEY="${sym}_${tf}"
-    if [[ "$ATR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        PAIR_ATR_OVERRIDES["$PAIR_KEY"]="$ATR_INPUT"
-        echo -e "    ${GREEN}→ Fixiert auf: $ATR_INPUT${NC}"
+read_ear_param() {
+    local NAME="$1"; local DEFAULT="$2"; local VAR_NAME="$3"
+    read -p "  $NAME [Empfehlung: $DEFAULT, leer=Optuna frei]: " VAL
+    VAL="${VAL//[$'\r\n ']/}"
+    if [[ "$VAL" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        eval "$VAR_NAME=$VAL"
+        echo -e "    ${GREEN}-> Fixiert auf: $VAL${NC}"
     else
-        PAIR_ATR_OVERRIDES["$PAIR_KEY"]=""
-        echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
+        eval "$VAR_NAME="
+        echo -e "    ${CYAN}-> Optuna optimiert frei${NC}"
     fi
-done <<< "$PAIRS"
+}
 
-echo ""
-
-# Trend-Min-Bricks (global für alle Pairs)
-read -p "  trend_min_bricks — Mindest-Trend-Bricks [2-6, leer=Optuna frei]: " TREND_INPUT
-TREND_INPUT="${TREND_INPUT//[$'\r\n ']/}"
-TREND_ARG=""
-if [[ "$TREND_INPUT" =~ ^[2-6]$ ]]; then
-    TREND_ARG="$TREND_INPUT"
-    echo -e "    ${GREEN}→ Fixiert auf: $TREND_INPUT${NC}"
-else
-    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
-fi
-
-read -p "  reversal_bricks  — Reversal-Bestätigung [1-3, leer=Optuna frei]: " REVERSAL_INPUT
-REVERSAL_INPUT="${REVERSAL_INPUT//[$'\r\n ']/}"
-REVERSAL_ARG=""
-if [[ "$REVERSAL_INPUT" =~ ^[1-3]$ ]]; then
-    REVERSAL_ARG="$REVERSAL_INPUT"
-    echo -e "    ${GREEN}→ Fixiert auf: $REVERSAL_INPUT${NC}"
-else
-    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
-fi
-
-read -p "  vol_filter       — Volumen-Filter [j/n, leer=Optuna frei]: " VOL_INPUT
-VOL_INPUT="${VOL_INPUT//[$'\r\n ']/}"
-VOL_ARG=""
-if [[ "$VOL_INPUT" == "j" || "$VOL_INPUT" == "J" || "$VOL_INPUT" == "y" || "$VOL_INPUT" == "Y" ]]; then
-    VOL_ARG="true"
-    echo -e "    ${GREEN}→ Fixiert auf: aktiviert${NC}"
-elif [[ "$VOL_INPUT" == "n" || "$VOL_INPUT" == "N" ]]; then
-    VOL_ARG="false"
-    echo -e "    ${GREEN}→ Fixiert auf: deaktiviert${NC}"
-else
-    echo -e "    ${CYAN}→ Optuna optimiert frei${NC}"
-fi
+read_ear_param "base_pct"      "0.004" BASE_PCT_ARG
+read_ear_param "k_entropy"     "0.8"   K_ENTROPY_ARG
+read_ear_param "h_window"      "10"    H_WINDOW_ARG
+read_ear_param "chaos_h_min"   "0.65"  CHAOS_H_MIN_ARG
+read_ear_param "chaos_min_n"   "4"     CHAOS_MIN_N_ARG
+read_ear_param "squeeze_ratio" "0.92"  SQUEEZE_RATIO_ARG
 
 # ── Optimizer pro Pair ────────────────────────────────────────────────────────
 OPTIMIZER="$SCRIPT_DIR/src/zerobot/analysis/optimizer.py"
 
 while IFS=' ' read -r sym tf; do
-    PAIR_KEY="${sym}_${tf}"
-    ATR_OVERRIDE="${PAIR_ATR_OVERRIDES[$PAIR_KEY]}"
     COIN=$(echo "$sym" | cut -d'/' -f1)
 
     echo ""
@@ -254,12 +206,13 @@ while IFS=' ' read -r sym tf; do
     echo "======================================================="
     echo ""
 
-    # Baue optionale Args
     EXTRA_ARGS=""
-    [ -n "$ATR_OVERRIDE" ]  && EXTRA_ARGS="$EXTRA_ARGS --fixed-atr-multiplier $ATR_OVERRIDE"
-    [ -n "$TREND_ARG" ]     && EXTRA_ARGS="$EXTRA_ARGS --fixed-trend-min-bricks $TREND_ARG"
-    [ -n "$REVERSAL_ARG" ]  && EXTRA_ARGS="$EXTRA_ARGS --fixed-reversal-bricks $REVERSAL_ARG"
-    [ -n "$VOL_ARG" ]       && EXTRA_ARGS="$EXTRA_ARGS --fixed-vol-filter $VOL_ARG"
+    [ -n "$BASE_PCT_ARG"      ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-base-pct $BASE_PCT_ARG"
+    [ -n "$K_ENTROPY_ARG"     ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-k-entropy $K_ENTROPY_ARG"
+    [ -n "$H_WINDOW_ARG"      ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-h-window $H_WINDOW_ARG"
+    [ -n "$CHAOS_H_MIN_ARG"   ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-chaos-h-min $CHAOS_H_MIN_ARG"
+    [ -n "$CHAOS_MIN_N_ARG"   ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-chaos-min-n $CHAOS_MIN_N_ARG"
+    [ -n "$SQUEEZE_RATIO_ARG" ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-squeeze-ratio $SQUEEZE_RATIO_ARG"
 
     $PYTHON "$OPTIMIZER" \
         --pairs         "${sym}|${tf}" \

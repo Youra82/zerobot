@@ -79,7 +79,7 @@ def run_single_analysis(start_date, end_date, start_capital):
                 "PnL %":      result.get('total_pnl_pct', -100),
                 "Max DD %":   result.get('max_drawdown_pct', 1.0) * 100,
                 "Endkapital": result.get('end_capital', start_capital),
-                "Renko ATR":  round(strategy_params.get('atr_multiplier', 0), 3),
+                "EAR base%":  round(strategy_params.get('base_pct', 0) * 100, 3),
                 "Hebel":      risk_params.get('leverage', '?'),
                 "SL ATR":     round(risk_params.get('atr_multiplier_sl', 0), 2),
                 "RRR":        round(risk_params.get('risk_reward_ratio', 0), 2),
@@ -99,7 +99,7 @@ def run_single_analysis(start_date, end_date, start_capital):
     pd.set_option('display.max_columns', None)
     pd.set_option('display.float_format', '{:.2f}'.format)
     print("\n\n" + "=" * 120)
-    print("                       ZeroBot Renko — Einzelstrategien")
+    print("                       ZeroBot EAR — Einzelstrategien")
     print("=" * 120)
     print(results_df.to_string(index=False))
     print("=" * 120)

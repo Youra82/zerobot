@@ -11,8 +11,8 @@ import pandas as pd
 import ta
 import math
 
-from zerobot.strategy.renko_engine import RenkoEngine
-from zerobot.strategy.renko_logic import get_renko_signal
+from zerobot.strategy.ear_engine import EAREngine
+from zerobot.strategy.ear_logic import get_ear_signal
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message
 from zerobot.utils.timeframe_utils import determine_htf
@@ -111,7 +111,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         return
 
     try:
-        logger.info(f"Prüfe ZeroBot (Renko) Signal für {symbol} ({timeframe})...")
+        logger.info(f"Prüfe ZeroBot (EAR) Signal für {symbol} ({timeframe})...")
 
         recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
         if recent_data.empty or len(recent_data) < 50:
@@ -137,15 +137,15 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             except Exception as e:
                 logger.warning(f"HTF-Daten konnten nicht abgerufen werden: {e}")
 
-        # Renko Engine
-        engine         = RenkoEngine(settings=strat_params)
+        # EAR Engine
+        engine         = EAREngine(settings=strat_params)
         processed_data = engine.process_dataframe(recent_data)
         current_candle = processed_data.iloc[-1]
 
-        signal_side, signal_price = get_renko_signal(processed_data, current_candle, params, market_bias)
+        signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, market_bias)
 
         if not signal_side:
-            logger.info("Kein Renko-Signal – überspringe.")
+            logger.info("Kein EAR-Signal – überspringe.")
             return
 
         # Re-Entry-Schutz
@@ -269,7 +269,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
             msg = (
-                f"ZEROBOT (Renko): {symbol} ({timeframe})\n"
+                f"ZEROBOT (EAR): {symbol} ({timeframe})\n"
                 f"- Richtung: {pos_side.upper()}\n"
                 f"- Entry: ${entry_price:.6f}\n"
                 f"- SL: ${sl_rounded:.6f}\n"
