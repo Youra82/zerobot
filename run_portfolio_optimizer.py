@@ -2,7 +2,7 @@
 """
 run_portfolio_optimizer.py  (zerobot)
 
-Lädt alle Renko-Configs, führt Portfolio-Simulation durch und wählt das beste
+Lädt alle EAR-Configs, führt Portfolio-Simulation durch und wählt das beste
 Portfolio per Greedy-Algorithmus. Schreibt active_strategies in settings.json.
 
 Aufruf:
@@ -409,7 +409,7 @@ def main() -> int:
     max_positions = int(settings.get('live_trading_settings', {}).get('max_open_positions', 10))
 
     print(f"\n{'─'*72}")
-    print(f"{B}  ZeroBot — Portfolio-Optimizer (Renko){NC}")
+    print(f"{B}  ZeroBot — Portfolio-Optimizer (EAR){NC}")
     print(f"  Kapital: {capital:.0f} USDT | MaxDD <= {max_dd:.0f}% | "
           f"Zeitraum: {start_date} → {end_date}")
     print(f"{'─'*72}\n")

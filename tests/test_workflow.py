@@ -18,7 +18,7 @@ from zerobot.utils.timeframe_utils import determine_htf
 
 @pytest.fixture(scope="module")
 def test_setup():
-    print("\n--- Starte ZeroBot Workflow-Test (Renko) ---")
+    print("\n--- Starte ZeroBot Workflow-Test (EAR) ---")
 
     secret_path = os.path.join(PROJECT_ROOT, 'secret.json')
     if not os.path.exists(secret_path):
@@ -112,7 +112,7 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
 
     with patch('zerobot.utils.trade_manager.set_trade_lock'), \
          patch('zerobot.utils.trade_manager.is_trade_locked', return_value=False), \
-         patch('zerobot.utils.trade_manager.get_renko_signal', return_value=('buy', None)):
+         patch('zerobot.utils.trade_manager.get_ear_signal', return_value=('buy', None)):
 
         print("\n[Schritt 1/3] Simuliere Buy-Signal und prüfe Trade-Eröffnung...")
         check_and_open_new_position(exchange, None, None, params, telegram_config, logger)

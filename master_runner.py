@@ -24,7 +24,7 @@ def main():
         return
 
     print("=======================================================")
-    print("ZeroBot Master Runner v1.0 (Renko)")
+    print("ZeroBot Master Runner v1.0 (EAR)")
     print("=======================================================")
 
     auto_opt_script = os.path.join(SCRIPT_DIR, 'auto_optimizer_scheduler.py')

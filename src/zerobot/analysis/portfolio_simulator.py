@@ -23,9 +23,9 @@ class Bias:
 
 
 def run_portfolio_simulation(start_capital, strategies_data, start_date, end_date, verbose=True):
-    """Chronologische Portfolio-Simulation mit mehreren ZeroBot-Renko-Strategien."""
+    """Chronologische Portfolio-Simulation mit mehreren ZeroBot-EAR-Strategien."""
     if verbose:
-        print("\n--- Starte Portfolio-Simulation (ZeroBot Renko)... ---")
+        print("\n--- Starte Portfolio-Simulation (ZeroBot EAR)... ---")
         print("1/3: Bereite Strategie-Daten vor...")
 
     processed_strategies = {}

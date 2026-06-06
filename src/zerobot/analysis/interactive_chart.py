@@ -3,7 +3,7 @@
 ZeroBot Interaktive Charts (Modus 4)
 
 Generiert Plotly-HTML mit:
-  - Renko-Brick-Chart (echte Renko-Kerzen, keine OHLCV)
+  - EAR-Brick-Chart (Entropy-Adaptive Renko Bricks, keine OHLCV)
   - Entry/Exit Trade-Marker (Long/Short, TP/SL)
   - Equity-Curve (rechte Y-Achse)
   - Volumen-Panel (pro Brick)
@@ -13,6 +13,7 @@ Generiert Plotly-HTML mit:
 import os
 import sys
 import json
+import numpy as np
 from datetime import datetime, timezone
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -47,102 +48,85 @@ def _load_all_configs() -> list:
     return configs
 
 
-def _build_renko_bricks(df, strategy_params: dict) -> tuple:
+def _build_ear_bricks(df, strategy_params: dict) -> tuple:
     """
-    Baut Renko-Bricks aus OHLCV und gibt ein DataFrame mit
-    OHLC-Daten pro Brick zurueck (brick_idx als Index).
+    Baut EAR-Bricks (Entropy-Adaptive Renko) aus OHLCV und gibt ein DataFrame
+    mit OHLC-Daten pro Brick zurueck (brick_idx als Index).
 
     Jeder Brick:
-      open  = base-Preis vor dem Brick
-      close = base-Preis nach dem Brick
+      open  = Preis-Level vor dem Brick (= Close des Vorgaenger-Bricks)
+      close = Preis-Level nach dem Brick
       high  = max(open, close)
       low   = min(open, close)
-      timestamp = Timestamp der Kerze die den Brick ausgeloest hat
+      timestamp = Timestamp der ausloesenden Kerze
       direction = +1 (up) / -1 (down)
-      volume, atr = Werte der ausloesenden Kerze
+      volume, atr, H = Werte der ausloesenden Kerze / Entropie
 
-    Gibt (brick_df, brick_size) zurueck.
+    Gibt (brick_df, avg_brick_size) zurueck.
     """
     import pandas as pd
-    from zerobot.strategy.renko_engine import RenkoEngine
+    from zerobot.strategy.ear_engine import EAREngine
 
-    engine     = RenkoEngine(settings=strategy_params)
-    brick_size = engine._compute_brick_size(df)
-    if brick_size <= 0:
-        return pd.DataFrame(), brick_size
+    engine     = EAREngine(settings=strategy_params)
+    raw_bricks = engine._build_bricks(df)
 
-    closes     = df['close'].values
+    if not raw_bricks:
+        return pd.DataFrame(), 0.0
+
     timestamps = df.index.tolist()
     has_vol    = 'volume' in df.columns
     volumes    = df['volume'].values if has_vol else None
-    has_atr    = 'atr' in df.columns
-    atrs       = df['atr'].values if has_atr else None
 
-    current_base = closes[0]
-    bricks = []
+    records = []
+    for i, b in enumerate(raw_bricks):
+        cidx  = int(b['candle_idx'])
+        o     = raw_bricks[i - 1]['close'] if i > 0 else b['close']
+        c     = b['close']
+        direction = 1 if b['direction'] == 'up' else -1
+        ts    = timestamps[cidx] if cidx < len(timestamps) else timestamps[-1]
+        vol   = float(volumes[cidx]) if volumes is not None and cidx < len(volumes) else 0.0
+        atr_v = float(b['atr']) if not np.isnan(b['atr']) else 0.0
+        records.append({
+            'timestamp': ts,
+            'open':      o,
+            'close':     c,
+            'high':      max(o, c),
+            'low':       min(o, c),
+            'direction': direction,
+            'volume':    vol,
+            'atr':       atr_v,
+            'H':         float(b['H']),
+        })
 
-    for i, close in enumerate(closes):
-        ts    = timestamps[i]
-        vol   = float(volumes[i]) if volumes is not None else 0.0
-        atr_v = float(atrs[i])   if atrs    is not None else 0.0
-
-        while close >= current_base + brick_size:
-            o = current_base
-            c = current_base + brick_size
-            bricks.append({
-                'timestamp': ts,
-                'open':      o,
-                'close':     c,
-                'high':      c,
-                'low':       o,
-                'direction': 1,
-                'volume':    vol,
-                'atr':       atr_v,
-            })
-            current_base = c
-
-        while close <= current_base - brick_size:
-            o = current_base
-            c = current_base - brick_size
-            bricks.append({
-                'timestamp': ts,
-                'open':      o,
-                'close':     c,
-                'high':      o,
-                'low':       c,
-                'direction': -1,
-                'volume':    vol,
-                'atr':       atr_v,
-            })
-            current_base = c
-
-    if not bricks:
-        return pd.DataFrame(), brick_size
-
-    brick_df = pd.DataFrame(bricks)
+    brick_df = pd.DataFrame(records)
     brick_df.index.name = 'brick_idx'
-    return brick_df, brick_size
+    avg_size = brick_df['close'].diff().abs().median() if len(brick_df) > 1 else 0.0
+    return brick_df, float(avg_size)
 
 
-def _detect_signals(brick_df, strategy_params: dict) -> list:
+def _detect_ear_signals(brick_df, strategy_params: dict) -> list:
     """
-    Gibt Liste von Brick-Indizes zurueck an denen ein Renko-Signal vorlag.
+    Gibt Liste von Brick-Indizes zurueck an denen ein EAR Entropy-Squeeze-Signal vorlag.
     Format: [(brick_idx, direction), ...] wobei direction = +1 LONG, -1 SHORT
     """
-    trend_min = int(strategy_params.get('trend_min_bricks', 3))
-    reversal  = int(strategy_params.get('reversal_bricks', 2))
-    window    = trend_min + reversal
-    dirs      = brick_df['direction'].tolist()
-    signals   = []
+    chaos_h_min   = float(strategy_params.get('chaos_h_min',   0.65))
+    chaos_min_n   = int(  strategy_params.get('chaos_min_n',   4))
+    squeeze_ratio = float(strategy_params.get('squeeze_ratio', 0.92))
 
-    for i in range(window - 1, len(dirs)):
-        rev_slice   = dirs[i - reversal + 1: i + 1]
-        trend_slice = dirs[i - reversal - trend_min + 1: i - reversal + 1]
+    if 'H' not in brick_df.columns or len(brick_df) < chaos_min_n + 2:
+        return []
 
-        if all(d == 1  for d in rev_slice) and all(d == -1 for d in trend_slice):
-            signals.append((i, 1))   # LONG
-        elif all(d == -1 for d in rev_slice) and all(d == 1  for d in trend_slice):
-            signals.append((i, -1))  # SHORT
+    H    = brick_df['H'].values
+    dirs = brick_df['direction'].values
+    signals = []
+
+    for i in range(chaos_min_n + 1, len(brick_df)):
+        window_H = H[i - chaos_min_n:i]
+        if not all(h > chaos_h_min for h in window_H):
+            continue
+        if H[i] >= window_H.mean() * squeeze_ratio:
+            continue
+        signals.append((i, int(dirs[i])))
 
     return signals
 
@@ -163,7 +147,7 @@ def _generate_chart(symbol: str, timeframe: str,
                     start_date: str, end_date: str,
                     start_capital: float,
                     strategy_params: dict, risk_params: dict) -> str:
-    """Generiert HTML-Renko-Chart. Gibt Pfad zur HTML-Datei zurueck."""
+    """Generiert HTML-EAR-Chart. Gibt Pfad zur HTML-Datei zurueck."""
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -187,9 +171,9 @@ def _generate_chart(symbol: str, timeframe: str,
     df['atr'] = atr_ind.average_true_range()
     df.dropna(subset=['atr'], inplace=True)
 
-    # Renko-Bricks bauen
-    print('INFO: Berechne Renko-Bricks...')
-    brick_df, brick_size = _build_renko_bricks(df, strategy_params)
+    # EAR-Bricks bauen
+    print('INFO: Berechne EAR-Bricks...')
+    brick_df, brick_size = _build_ear_bricks(df, strategy_params)
     if brick_df.empty:
         print(f'{RED}Keine Bricks berechnet.{NC}')
         return ''
@@ -203,8 +187,8 @@ def _generate_chart(symbol: str, timeframe: str,
     tick_vals = list(range(0, n_bricks, tick_step))
     tick_text = [str(brick_df.iloc[i]['timestamp'])[:10] for i in tick_vals]
 
-    # Renko-Signale
-    signals   = _detect_signals(brick_df, strategy_params)
+    # EAR-Signale
+    signals   = _detect_ear_signals(brick_df, strategy_params)
     long_sigs  = [i for i, d in signals if d ==  1]
     short_sigs = [i for i, d in signals if d == -1]
 
@@ -257,7 +241,7 @@ def _generate_chart(symbol: str, timeframe: str,
         subplot_titles=['', 'Volumen', 'ATR'],
     )
 
-    # --- Panel 1: Renko-Candlestick ---
+    # --- Panel 1: EAR-Candlestick ---
     renko_colors = [up_color if d == 1 else down_color
                     for d in brick_df['direction']]
     hover_text = [
@@ -272,7 +256,7 @@ def _generate_chart(symbol: str, timeframe: str,
         high=brick_df['high'],
         low=brick_df['low'],
         close=brick_df['close'],
-        name='Renko',
+        name='EAR',
         increasing_line_color=up_color,
         increasing_fillcolor=up_color,
         decreasing_line_color=down_color,
@@ -282,7 +266,7 @@ def _generate_chart(symbol: str, timeframe: str,
         hoverinfo='text',
     ), row=1, col=1, secondary_y=False)
 
-    # Renko LONG-Signale (grüne Rauten unter dem Brick)
+    # EAR LONG-Signale (grüne Rauten unter dem Brick)
     if long_sigs:
         sig_y = [float(brick_df.iloc[i]['low']) * 0.997 for i in long_sigs]
         fig.add_trace(go.Scatter(
@@ -290,11 +274,11 @@ def _generate_chart(symbol: str, timeframe: str,
             mode='markers',
             marker=dict(symbol='diamond', size=9, color='#00e676',
                         line=dict(color='#ffffff', width=0.5)),
-            name='Renko LONG-Signal',
+            name='EAR LONG-Signal',
             hovertemplate='LONG Signal<br>Brick %{x}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
-    # Renko SHORT-Signale (rote Rauten ueber dem Brick)
+    # EAR SHORT-Signale (rote Rauten ueber dem Brick)
     if short_sigs:
         sig_y = [float(brick_df.iloc[i]['high']) * 1.003 for i in short_sigs]
         fig.add_trace(go.Scatter(
@@ -302,7 +286,7 @@ def _generate_chart(symbol: str, timeframe: str,
             mode='markers',
             marker=dict(symbol='diamond', size=9, color='#ff1744',
                         line=dict(color='#ffffff', width=0.5)),
-            name='Renko SHORT-Signal',
+            name='EAR SHORT-Signal',
             hovertemplate='SHORT Signal<br>Brick %{x}<extra></extra>',
         ), row=1, col=1, secondary_y=False)
 
@@ -434,7 +418,7 @@ def _generate_chart(symbol: str, timeframe: str,
     # --- Layout ---
     sign       = '+' if pnl_pct >= 0 else ''
     title_text = (
-        f'{symbol} {timeframe} — ZeroBot Renko | '
+        f'{symbol} {timeframe} — ZeroBot EAR | '
         f'Bricks: {n_bricks} | Brick-Groesse: {brick_size:.4f} | '
         f'Trades: {n_trades} | WR: {win_rate:.1f}% | '
         f'PnL: {sign}{pnl_pct:.1f}% | MaxDD: {max_dd:.1f}%'
@@ -479,7 +463,7 @@ def _send_via_telegram(chart_paths: list, bot_token: str, chat_id: str):
     import requests
     for path in chart_paths:
         filename = os.path.basename(path)
-        caption  = f'ZeroBot Renko-Chart: {filename.replace("chart_", "").replace(".html", "")}'
+        caption  = f'ZeroBot EAR-Chart: {filename.replace("chart_", "").replace(".html", "")}'
         try:
             with open(path, 'rb') as f:
                 requests.post(

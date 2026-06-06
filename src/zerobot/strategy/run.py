@@ -93,7 +93,7 @@ def run_for_account(account, telegram_config, params, logger):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ZeroBot Renko Trading-Skript")
+    parser = argparse.ArgumentParser(description="ZeroBot EAR Trading-Skript")
     parser.add_argument('--symbol',    required=True, type=str)
     parser.add_argument('--timeframe', required=True, type=str)
     args = parser.parse_args()
