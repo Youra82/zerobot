@@ -818,16 +818,40 @@ ZeroBot ist eine **Renko-Strategie** — er baut Bricks aus dem ATR und sucht Tr
 
 ### Coin-Eignung
 
-| Coin | Trend-Stärke | Renko-Qualität | Bewertung |
-|---|---|---|---|
-| **BTC** | Sehr hoch — klare institutionelle Trends | Exzellente Brick-Sequenzen | ✅✅ Beste Wahl |
-| **ETH** | Sehr hoch — korreliert mit BTC | Sehr gute Sequenzen | ✅✅ Sehr gut |
-| **SOL** | Hoch — starke Richtungskerzen | Gute Brick-Muster | ✅ Gut |
-| **BNB** | Mittel-hoch — stabil | Gute Sequenzen | ✅ Gut |
-| **XRP** | Mittel — range-lastig | Gute Range-Reversal | ✅ Gut |
-| **AVAX** | Mittel-hoch im Bullmarkt | Ausreichend | ✅ Gut |
-| **DOGE** | Sentiment-getrieben | Unzuverlässige Brick-Muster | ⚠️ Vorsicht |
-| **SHIB/PEPE** | Pump-driven | Keine stabilen Sequenzen | ❌ Nicht geeignet |
+Alle Coins sind auf Bitget handelbar und haben ausreichend Datenhistorie für Backtests (min. 2 Jahre). Coins mit ✅✅ eignen sich am besten für Renko-Reversals da sie klare, anhaltende Trends bilden.
+
+| Coin | Trend-Stärke | Renko-Qualität | Bitget-Daten | Bewertung |
+|---|---|---|---|---|
+| **BTC** | Sehr hoch — klare institutionelle Trends | Exzellente Brick-Sequenzen | seit 2020 | ✅✅ Beste Wahl |
+| **ETH** | Sehr hoch — korreliert mit BTC | Sehr gute Sequenzen | seit 2020 | ✅✅ Sehr gut |
+| **SOL** | Hoch — starke Richtungskerzen | Gute Brick-Muster | seit 2021 | ✅ Gut |
+| **BNB** | Mittel-hoch — stabil | Gute Sequenzen | seit 2020 | ✅ Gut |
+| **XRP** | Mittel — range-lastig | Gute Range-Reversal | seit 2020 | ✅ Gut |
+| **AVAX** | Mittel-hoch im Bullmarkt | Ausreichend | seit 2021 | ✅ Gut |
+| **LTC** | Mittel — langsamer als BTC | Saubere Brick-Folgen | seit 2020 | ✅ Gut |
+| **LINK** | Hoch im Bullmarkt — zyklisch | Gute Trend-Bricks | seit 2020 | ✅ Gut |
+| **ADA** | Mittel — träge Bewegungen | Ausreichend | seit 2020 | ✅ Gut |
+| **DOT** | Mittel-hoch — zyklisch | Solide Brick-Sequenzen | seit 2021 | ✅ Gut |
+| **MATIC/POL** | Mittel-hoch im Bullmarkt | Gute Reversal-Muster | seit 2021 | ✅ Gut |
+| **UNI** | Mittel — DeFi-korreliert | Ausreichend | seit 2021 | ✅ Gut |
+| **ATOM** | Mittel — eigene Zyklen | Solide Sequenzen | seit 2021 | ✅ Gut |
+| **NEAR** | Hoch im Bullmarkt | Gute Trend-Bricks | seit 2022 | ✅ Gut |
+| **ARB** | Mittel-hoch — L2-korreliert | Ausreichend | seit 2023 | ✅ Gut |
+| **OP** | Mittel-hoch — L2-korreliert | Ausreichend | seit 2023 | ✅ Gut |
+| **SUI** | Hoch im Bullmarkt — volatil | Gute Trend-Sequenzen | seit 2023 | ✅ Gut |
+| **APT** | Mittel-hoch — volatil | Ausreichend | seit 2023 | ✅ Gut |
+| **INJ** | Hoch — starke Richtungskerzen | Gute Brick-Muster | seit 2022 | ✅ Gut |
+| **TRX** | Niedrig-mittel — sehr stabil | Wenig Bewegung, kleine Bricks | seit 2020 | ✅ Bedingt |
+| **FIL** | Mittel — themengetrieben | Solide in Trendphasen | seit 2021 | ✅ Bedingt |
+| **ETC** | Mittel — BTC-korreliert | Saubere Brick-Folgen | seit 2020 | ✅ Bedingt |
+| **BCH** | Mittel — BTC-korreliert | Ausreichend | seit 2020 | ✅ Bedingt |
+| **AAVE** | Mittel — DeFi-zyklisch | Ausreichend | seit 2021 | ✅ Bedingt |
+| **MKR** | Mittel — illiquide Spikes | Unregelmäßige Sequenzen | seit 2021 | ⚠️ Vorsicht |
+| **DOGE** | Sentiment-getrieben | Unzuverlässige Brick-Muster | seit 2020 | ⚠️ Vorsicht |
+| **WLD** | Niedrig — sehr jung | Kaum Datenhistorie | seit 2023 | ⚠️ Vorsicht |
+| **FLOKI** | Meme — kaum Trend | Chaotische Sequenzen | seit 2022 | ❌ Nicht geeignet |
+| **SHIB** | Pump-driven | Keine stabilen Sequenzen | seit 2021 | ❌ Nicht geeignet |
+| **PEPE** | Pump-driven — extrem volatil | Keine stabilen Sequenzen | seit 2023 | ❌ Nicht geeignet |
 
 ### Empfohlene Kombinationen
 
