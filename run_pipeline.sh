@@ -163,12 +163,10 @@ echo ""
 echo "--- EAR Signal-Parameter ---"
 echo ""
 echo "  Was Optuna optimiert wenn du leer lässt:"
-printf "  %-22s %s\n" "base_pct"      "Basis-Brick-Größe in % des Preises   (0.002–0.010)"
-printf "  %-22s %s\n" "k_entropy"     "Entropie-Gewichtung der Brick-Size   (0.4–1.5)"
-printf "  %-22s %s\n" "h_window"      "Glättungs-Fenster für Entropie       (5–20)"
-printf "  %-22s %s\n" "chaos_h_min"   "Min-Entropie für Chaos-Brick         (0.55–0.80)"
-printf "  %-22s %s\n" "chaos_min_n"   "Mindest-Chaos-Bricks vor Squeeze     (3–7)"
-printf "  %-22s %s\n" "squeeze_ratio" "Squeeze-Schwelle (H < avg×ratio)     (0.80–0.98)"
+printf "  %-22s %s\n" "base_pct"         "Basis-Brick-Größe in % des Preises      (0.002–0.010)"
+printf "  %-22s %s\n" "k_entropy"        "Entropie-Gewichtung der Brick-Size      (0.4–1.5)"
+printf "  %-22s %s\n" "h_window"         "Glättungs-Fenster für Entropie          (5–20)"
+printf "  %-22s %s\n" "trend_min_bricks" "Mindest-Bricks in gleicher Richtung     (2–6)"
 echo ""
 echo "  Zahl/Wert eingeben → wird fixiert | leer → Optuna optimiert frei"
 echo ""
@@ -186,12 +184,10 @@ read_ear_param() {
     fi
 }
 
-read_ear_param "base_pct"      "0.004" BASE_PCT_ARG
-read_ear_param "k_entropy"     "0.8"   K_ENTROPY_ARG
-read_ear_param "h_window"      "10"    H_WINDOW_ARG
-read_ear_param "chaos_h_min"   "0.65"  CHAOS_H_MIN_ARG
-read_ear_param "chaos_min_n"   "4"     CHAOS_MIN_N_ARG
-read_ear_param "squeeze_ratio" "0.92"  SQUEEZE_RATIO_ARG
+read_ear_param "base_pct"         "0.004" BASE_PCT_ARG
+read_ear_param "k_entropy"        "0.8"   K_ENTROPY_ARG
+read_ear_param "h_window"         "10"    H_WINDOW_ARG
+read_ear_param "trend_min_bricks" "3"     TREND_MIN_BRICKS_ARG
 
 # ── Optimizer pro Pair ────────────────────────────────────────────────────────
 OPTIMIZER="$SCRIPT_DIR/src/zerobot/analysis/optimizer.py"
@@ -207,12 +203,10 @@ while IFS=' ' read -r sym tf; do
     echo ""
 
     EXTRA_ARGS=""
-    [ -n "$BASE_PCT_ARG"      ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-base-pct $BASE_PCT_ARG"
-    [ -n "$K_ENTROPY_ARG"     ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-k-entropy $K_ENTROPY_ARG"
-    [ -n "$H_WINDOW_ARG"      ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-h-window $H_WINDOW_ARG"
-    [ -n "$CHAOS_H_MIN_ARG"   ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-chaos-h-min $CHAOS_H_MIN_ARG"
-    [ -n "$CHAOS_MIN_N_ARG"   ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-chaos-min-n $CHAOS_MIN_N_ARG"
-    [ -n "$SQUEEZE_RATIO_ARG" ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-squeeze-ratio $SQUEEZE_RATIO_ARG"
+    [ -n "$BASE_PCT_ARG"          ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-base-pct $BASE_PCT_ARG"
+    [ -n "$K_ENTROPY_ARG"         ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-k-entropy $K_ENTROPY_ARG"
+    [ -n "$H_WINDOW_ARG"          ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-h-window $H_WINDOW_ARG"
+    [ -n "$TREND_MIN_BRICKS_ARG"  ] && EXTRA_ARGS="$EXTRA_ARGS --fixed-trend-min-bricks $TREND_MIN_BRICKS_ARG"
 
     $PYTHON "$OPTIMIZER" \
         --pairs         "${sym}|${tf}" \

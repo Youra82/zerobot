@@ -32,12 +32,10 @@ START_CAPITAL           = 100
 OPTIM_MODE              = "strict"
 
 # Optionale Fixierungen
-FIXED_BASE_PCT      = None
-FIXED_K_ENTROPY     = None
-FIXED_H_WINDOW      = None
-FIXED_CHAOS_H_MIN   = None
-FIXED_CHAOS_MIN_N   = None
-FIXED_SQUEEZE_RATIO = None
+FIXED_BASE_PCT          = None
+FIXED_K_ENTROPY         = None
+FIXED_H_WINDOW          = None
+FIXED_TREND_MIN_BRICKS  = None
 
 RESULTS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_optimizer_run.json')
 
@@ -47,23 +45,19 @@ def create_safe_filename(symbol, timeframe):
 
 
 def objective(trial):
-    base_pct      = FIXED_BASE_PCT      if FIXED_BASE_PCT      is not None else trial.suggest_float('base_pct',      0.002, 0.010)
-    k_entropy     = FIXED_K_ENTROPY     if FIXED_K_ENTROPY     is not None else trial.suggest_float('k_entropy',     0.4,   1.5)
-    h_window      = FIXED_H_WINDOW      if FIXED_H_WINDOW      is not None else trial.suggest_int(  'h_window',      5,     20)
-    chaos_h_min   = FIXED_CHAOS_H_MIN   if FIXED_CHAOS_H_MIN   is not None else trial.suggest_float('chaos_h_min',   0.55,  0.80)
-    chaos_min_n   = FIXED_CHAOS_MIN_N   if FIXED_CHAOS_MIN_N   is not None else trial.suggest_int(  'chaos_min_n',   3,     7)
-    squeeze_ratio = FIXED_SQUEEZE_RATIO if FIXED_SQUEEZE_RATIO is not None else trial.suggest_float('squeeze_ratio', 0.80,  0.98)
+    base_pct         = FIXED_BASE_PCT         if FIXED_BASE_PCT         is not None else trial.suggest_float('base_pct',         0.002, 0.010)
+    k_entropy        = FIXED_K_ENTROPY        if FIXED_K_ENTROPY        is not None else trial.suggest_float('k_entropy',        0.4,   1.5)
+    h_window         = FIXED_H_WINDOW         if FIXED_H_WINDOW         is not None else trial.suggest_int(  'h_window',         5,     20)
+    trend_min_bricks = FIXED_TREND_MIN_BRICKS if FIXED_TREND_MIN_BRICKS is not None else trial.suggest_int(  'trend_min_bricks', 2,     6)
 
     strategy_params = {
-        'base_pct':      base_pct,
-        'k_entropy':     k_entropy,
-        'h_window':      h_window,
-        'chaos_h_min':   chaos_h_min,
-        'chaos_min_n':   chaos_min_n,
-        'squeeze_ratio': squeeze_ratio,
-        'symbol':        CURRENT_SYMBOL,
-        'timeframe':     CURRENT_TIMEFRAME,
-        'htf':           CURRENT_HTF,
+        'base_pct':         base_pct,
+        'k_entropy':        k_entropy,
+        'h_window':         h_window,
+        'trend_min_bricks': trend_min_bricks,
+        'symbol':           CURRENT_SYMBOL,
+        'timeframe':        CURRENT_TIMEFRAME,
+        'htf':              CURRENT_HTF,
     }
     risk_params = {
         'risk_reward_ratio':               trial.suggest_float('risk_reward_ratio',          1.5, 5.0),
@@ -95,7 +89,7 @@ def objective(trial):
 def main():
     global HISTORICAL_DATA, CURRENT_SYMBOL, CURRENT_TIMEFRAME, CURRENT_HTF
     global MAX_DRAWDOWN_CONSTRAINT, MIN_WIN_RATE_CONSTRAINT, MIN_PNL_CONSTRAINT, START_CAPITAL, OPTIM_MODE
-    global FIXED_BASE_PCT, FIXED_K_ENTROPY, FIXED_H_WINDOW, FIXED_CHAOS_H_MIN, FIXED_CHAOS_MIN_N, FIXED_SQUEEZE_RATIO
+    global FIXED_BASE_PCT, FIXED_K_ENTROPY, FIXED_H_WINDOW, FIXED_TREND_MIN_BRICKS
 
     parser = argparse.ArgumentParser(description="Parameter-Optimierung fuer ZeroBot (EAR)")
     parser.add_argument('--symbols',      type=str, default="")
@@ -111,12 +105,10 @@ def main():
     parser.add_argument('--min_pnl',      required=True,  type=float)
     parser.add_argument('--mode',         required=True,  type=str)
     # EAR-spezifische Fix-Parameter
-    parser.add_argument('--fixed-base-pct',      type=float, default=None)
-    parser.add_argument('--fixed-k-entropy',     type=float, default=None)
-    parser.add_argument('--fixed-h-window',      type=int,   default=None)
-    parser.add_argument('--fixed-chaos-h-min',   type=float, default=None)
-    parser.add_argument('--fixed-chaos-min-n',   type=int,   default=None)
-    parser.add_argument('--fixed-squeeze-ratio', type=float, default=None)
+    parser.add_argument('--fixed-base-pct',          type=float, default=None)
+    parser.add_argument('--fixed-k-entropy',         type=float, default=None)
+    parser.add_argument('--fixed-h-window',          type=int,   default=None)
+    parser.add_argument('--fixed-trend-min-bricks',  type=int,   default=None)
     args = parser.parse_args()
 
     MAX_DRAWDOWN_CONSTRAINT = args.max_drawdown / 100.0
@@ -125,20 +117,16 @@ def main():
     START_CAPITAL           = args.start_capital
     N_TRIALS                = args.trials
     OPTIM_MODE              = args.mode
-    FIXED_BASE_PCT          = args.fixed_base_pct
-    FIXED_K_ENTROPY         = args.fixed_k_entropy
-    FIXED_H_WINDOW          = args.fixed_h_window
-    FIXED_CHAOS_H_MIN       = args.fixed_chaos_h_min
-    FIXED_CHAOS_MIN_N       = args.fixed_chaos_min_n
-    FIXED_SQUEEZE_RATIO     = args.fixed_squeeze_ratio
+    FIXED_BASE_PCT         = args.fixed_base_pct
+    FIXED_K_ENTROPY        = args.fixed_k_entropy
+    FIXED_H_WINDOW         = args.fixed_h_window
+    FIXED_TREND_MIN_BRICKS = args.fixed_trend_min_bricks
 
     fixed_info = []
-    if FIXED_BASE_PCT      is not None: fixed_info.append(f"base_pct={FIXED_BASE_PCT}")
-    if FIXED_K_ENTROPY     is not None: fixed_info.append(f"k_entropy={FIXED_K_ENTROPY}")
-    if FIXED_H_WINDOW      is not None: fixed_info.append(f"h_window={FIXED_H_WINDOW}")
-    if FIXED_CHAOS_H_MIN   is not None: fixed_info.append(f"chaos_h_min={FIXED_CHAOS_H_MIN}")
-    if FIXED_CHAOS_MIN_N   is not None: fixed_info.append(f"chaos_min_n={FIXED_CHAOS_MIN_N}")
-    if FIXED_SQUEEZE_RATIO is not None: fixed_info.append(f"squeeze_ratio={FIXED_SQUEEZE_RATIO}")
+    if FIXED_BASE_PCT         is not None: fixed_info.append(f"base_pct={FIXED_BASE_PCT}")
+    if FIXED_K_ENTROPY        is not None: fixed_info.append(f"k_entropy={FIXED_K_ENTROPY}")
+    if FIXED_H_WINDOW         is not None: fixed_info.append(f"h_window={FIXED_H_WINDOW}")
+    if FIXED_TREND_MIN_BRICKS is not None: fixed_info.append(f"trend_min_bricks={FIXED_TREND_MIN_BRICKS}")
     if fixed_info:
         print(f"  [INFO] Fixierte Parameter: {', '.join(fixed_info)}")
 
@@ -224,12 +212,10 @@ def main():
             continue
 
         strategy_config = {
-            'base_pct':      round(best_params.get('base_pct',      FIXED_BASE_PCT      or 0.004), 4),
-            'k_entropy':     round(best_params.get('k_entropy',     FIXED_K_ENTROPY     or 0.8),   3),
-            'h_window':      int(  best_params.get('h_window',      FIXED_H_WINDOW      or 10)),
-            'chaos_h_min':   round(best_params.get('chaos_h_min',   FIXED_CHAOS_H_MIN   or 0.65),  3),
-            'chaos_min_n':   int(  best_params.get('chaos_min_n',   FIXED_CHAOS_MIN_N   or 4)),
-            'squeeze_ratio': round(best_params.get('squeeze_ratio', FIXED_SQUEEZE_RATIO or 0.92),  3),
+            'base_pct':         round(best_params.get('base_pct',         FIXED_BASE_PCT         or 0.004), 4),
+            'k_entropy':        round(best_params.get('k_entropy',        FIXED_K_ENTROPY        or 0.8),   3),
+            'h_window':         int(  best_params.get('h_window',         FIXED_H_WINDOW         or 10)),
+            'trend_min_bricks': int(  best_params.get('trend_min_bricks', FIXED_TREND_MIN_BRICKS or 3)),
         }
         risk_config = {
             'margin_mode':                     "isolated",

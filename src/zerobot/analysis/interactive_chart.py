@@ -106,27 +106,25 @@ def _build_ear_bricks(df, strategy_params: dict) -> tuple:
 
 def _detect_ear_signals(brick_df, strategy_params: dict) -> list:
     """
-    Gibt Liste von Brick-Indizes zurueck an denen ein EAR Entropy-Squeeze-Signal vorlag.
+    Gibt Liste von Brick-Indizes zurueck an denen ein EAR N-Brick-Signal vorlag.
     Format: [(brick_idx, direction), ...] wobei direction = +1 LONG, -1 SHORT
-    """
-    chaos_h_min   = float(strategy_params.get('chaos_h_min',   0.65))
-    chaos_min_n   = int(  strategy_params.get('chaos_min_n',   4))
-    squeeze_ratio = float(strategy_params.get('squeeze_ratio', 0.92))
 
-    if 'H' not in brick_df.columns or len(brick_df) < chaos_min_n + 2:
+    Signal: trend_min_bricks aufeinanderfolgende Bricks in gleicher Richtung.
+    """
+    trend_min_bricks = int(strategy_params.get('trend_min_bricks', 3))
+
+    if len(brick_df) < trend_min_bricks:
         return []
 
-    H    = brick_df['H'].values
-    dirs = brick_df['direction'].values
+    dirs    = brick_df['direction'].values
     signals = []
 
-    for i in range(chaos_min_n + 1, len(brick_df)):
-        window_H = H[i - chaos_min_n:i]
-        if not all(h > chaos_h_min for h in window_H):
-            continue
-        if H[i] >= window_H.mean() * squeeze_ratio:
-            continue
-        signals.append((i, int(dirs[i])))
+    for i in range(trend_min_bricks - 1, len(brick_df)):
+        window_dirs = dirs[i - trend_min_bricks + 1:i + 1]
+        if all(d == 1  for d in window_dirs):
+            signals.append((i, 1))
+        elif all(d == -1 for d in window_dirs):
+            signals.append((i, -1))
 
     return signals
 

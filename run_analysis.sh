@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_analysis.sh — ZeroBot Renko Wissenschaftliche Analysen
+# run_analysis.sh — ZeroBot EAR Wissenschaftliche Analysen
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -62,9 +62,9 @@ echo "  19) Drawdown Duration Analysis"
 echo ""
 echo -e "  ${CYAN}── EAR-Schnell-Sweeps ──────────────────────────────${NC}"
 echo "  20) base_pct-Sweep           (Basis-Brick-Groesse 0.002-0.010)"
-echo "  21) chaos_h_min-Sweep        (Chaos-Schwelle 0.50-0.80)"
-echo "  22) chaos_min_n-Sweep        (Chaos-Bricks-Anzahl 2-8)"
-echo "  23) squeeze_ratio-Sweep      (Squeeze-Faktor 0.75-0.98)"
+echo "  21) trend_min_bricks-Sweep   (Mindest-Bricks gleiche Richtung 2-6)"
+echo "  22) k_entropy-Sweep          (Entropie-Gewichtung 0.4-1.5)"
+echo "  23) h_window-Sweep           (Entropie-Glaettung 5-20)"
 echo "  24) Timeframe-Vergleich"
 echo ""
 echo "   0) Alle 1-19 Analysen nacheinander"
@@ -146,15 +146,15 @@ base_strat = dict(config.get('strategy', {}))
 if sweep_type == 'base_pct':
     values = [0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.010]
     param_name = 'base_pct'
-elif sweep_type == 'chaos_h_min':
-    values = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
-    param_name = 'chaos_h_min'
-elif sweep_type == 'chaos_min_n':
-    values = [2, 3, 4, 5, 6, 7, 8]
-    param_name = 'chaos_min_n'
-elif sweep_type == 'squeeze_ratio':
-    values = [0.75, 0.80, 0.85, 0.88, 0.90, 0.92, 0.95, 0.98]
-    param_name = 'squeeze_ratio'
+elif sweep_type == 'trend_min_bricks':
+    values = [2, 3, 4, 5, 6]
+    param_name = 'trend_min_bricks'
+elif sweep_type == 'k_entropy':
+    values = [0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5]
+    param_name = 'k_entropy'
+elif sweep_type == 'h_window':
+    values = [5, 7, 10, 12, 15, 20]
+    param_name = 'h_window'
 elif sweep_type == 'rr_ratio':
     values = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
     param_name = 'rr_ratio'
@@ -170,7 +170,7 @@ all_pnls = []
 for val in values:
     strat = dict(base_strat)
     r = dict(risk)
-    if param_name in ('base_pct','chaos_h_min','chaos_min_n','squeeze_ratio'):
+    if param_name in ('base_pct','trend_min_bricks','k_entropy','h_window'):
         strat[param_name] = val
     elif param_name == 'rr_ratio':
         r['risk_reward_ratio'] = val
@@ -184,7 +184,7 @@ best_pnl = max(all_pnls) if all_pnls else 0
 for idx, val in enumerate(values):
     strat = dict(base_strat)
     r = dict(risk)
-    if param_name in ('base_pct','chaos_h_min','chaos_min_n','squeeze_ratio'):
+    if param_name in ('base_pct','trend_min_bricks','k_entropy','h_window'):
         strat[param_name] = val
     elif param_name == 'rr_ratio':
         r['risk_reward_ratio'] = val
@@ -403,22 +403,22 @@ run_mode() {
         run_sweep "base_pct" "$CAP" "$SD" "$ED"
         ;;
 
-    21) echo -e "${GREEN}▶ chaos_h_min-Sweep (Chaos-Schwelle 0.50-0.80)${NC}"
+    21) echo -e "${GREEN}▶ trend_min_bricks-Sweep (Mindest-Bricks gleiche Richtung 2-6)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "chaos_h_min" "$CAP" "$SD" "$ED"
+        run_sweep "trend_min_bricks" "$CAP" "$SD" "$ED"
         ;;
 
-    22) echo -e "${GREEN}▶ chaos_min_n-Sweep (Chaos-Bricks-Anzahl 2-8)${NC}"
+    22) echo -e "${GREEN}▶ k_entropy-Sweep (Entropie-Gewichtung 0.4-1.5)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "chaos_min_n" "$CAP" "$SD" "$ED"
+        run_sweep "k_entropy" "$CAP" "$SD" "$ED"
         ;;
 
-    23) echo -e "${GREEN}▶ squeeze_ratio-Sweep (Squeeze-Faktor 0.75-0.98)${NC}"
+    23) echo -e "${GREEN}▶ h_window-Sweep (Entropie-Glaettung 5-20)${NC}"
         DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
         CAP=$(ask_capital)
-        run_sweep "squeeze_ratio" "$CAP" "$SD" "$ED"
+        run_sweep "h_window" "$CAP" "$SD" "$ED"
         ;;
 
     24) echo -e "${GREEN}▶ Timeframe-Vergleich${NC}"
@@ -455,7 +455,7 @@ for tf in tfs:
     data['atr'] = atr_ind.average_true_range()
     data.dropna(subset=['atr'], inplace=True)
     strat = {'base_pct': 0.004, 'k_entropy': 0.8, 'h_window': 10,
-             'chaos_h_min': 0.65, 'chaos_min_n': 4, 'squeeze_ratio': 0.92}
+             'trend_min_bricks': 3}
     risk  = {'risk_reward_ratio': 2.0, 'risk_per_trade_pct': 1.0, 'leverage': 10,
              'trailing_stop_activation_rr': 2.0, 'trailing_stop_callback_rate_pct': 1.0,
              'atr_multiplier_sl': 2.0, 'min_sl_pct': 0.3}

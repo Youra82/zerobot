@@ -23,12 +23,10 @@ class EAREngine:
     """
 
     def __init__(self, settings: dict):
-        self.base_pct      = float(settings.get('base_pct',      0.004))
-        self.k_entropy     = float(settings.get('k_entropy',     0.8))
-        self.h_window      = int(  settings.get('h_window',      10))
-        self.chaos_h_min   = float(settings.get('chaos_h_min',   0.65))
-        self.chaos_min_n   = int(  settings.get('chaos_min_n',   4))
-        self.squeeze_ratio = float(settings.get('squeeze_ratio', 0.92))
+        self.base_pct         = float(settings.get('base_pct',         0.004))
+        self.k_entropy        = float(settings.get('k_entropy',        0.8))
+        self.h_window         = int(  settings.get('h_window',         10))
+        self.trend_min_bricks = int(  settings.get('trend_min_bricks', 3))
 
     @staticmethod
     def _candle_entropy(o, h, l, c) -> float:
@@ -114,30 +112,34 @@ class EAREngine:
         """
         Haupt-Methode: verarbeitet OHLCV-DataFrame, fügt 'ear_signal' Spalte hinzu.
         ear_signal: 1=Long-Signal, -1=Short-Signal, 0=kein Signal
+
+        Signal: trend_min_bricks aufeinanderfolgende EAR-Bricks in gleicher
+        Richtung → Signal auf dem letzten Brick (Entropie steckt bereits in
+        der adaptiven Brick-Größe, kein zusätzlicher Squeeze-Filter nötig).
         """
         df = df.copy()
         df['ear_signal'] = 0
         df['ear_H']      = np.nan
 
         bricks = self._build_bricks(df)
-        if len(bricks) < self.chaos_min_n + 2:
+        if len(bricks) < self.trend_min_bricks:
             return df
 
         bdf = pd.DataFrame(bricks)
 
-        # Entropy-Squeeze-Signale finden
         sig_map = {}   # candle_idx -> (signal_val, H)
-        for i in range(self.chaos_min_n + 1, len(bdf)):
-            window = bdf.iloc[i - self.chaos_min_n:i]
-            if not (window['H'] > self.chaos_h_min).all():
+        for i in range(self.trend_min_bricks - 1, len(bdf)):
+            window_dirs = [bdf.iloc[j]['direction']
+                           for j in range(i - self.trend_min_bricks + 1, i + 1)]
+            if all(d == 'up'   for d in window_dirs):
+                sig = 1
+            elif all(d == 'down' for d in window_dirs):
+                sig = -1
+            else:
                 continue
-            curr = bdf.iloc[i]
-            if curr['H'] >= window['H'].mean() * self.squeeze_ratio:
-                continue
-            sig = 1 if curr['direction'] == 'up' else -1
-            sig_map[int(curr['candle_idx'])] = (sig, float(curr['H']))
+            cidx = int(bdf.iloc[i]['candle_idx'])
+            sig_map[cidx] = (sig, float(bdf.iloc[i]['H']))
 
-        # Signale in Original-DataFrame eintragen
         ear_signal_col = df.columns.get_loc('ear_signal')
         ear_h_col      = df.columns.get_loc('ear_H')
         for cidx, (sig, h_val) in sig_map.items():
