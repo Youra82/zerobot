@@ -1,13 +1,13 @@
-import os, sys, json, argparse, math
+﻿import os, sys, json, argparse, math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_active_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
 
-load_configs = load_active_configs
+load_configs = load_all_configs
 
 SESSIONS = {
     'Asien  (01-09 UTC)': (1, 9),

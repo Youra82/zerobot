@@ -20,7 +20,26 @@ from zerobot.utils.timeframe_utils import determine_htf
 secrets_cache = None
 
 
+def load_all_configs():
+    """Load all config files from configs directory (no settings.json filter).
+    Used by analysis scripts so they work even if strategy isn't yet active."""
+    configs_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
+    result = []
+    if os.path.isdir(configs_dir):
+        for fn in sorted(os.listdir(configs_dir)):
+            if fn.startswith('config_') and fn.endswith('.json'):
+                try:
+                    with open(os.path.join(configs_dir, fn)) as f:
+                        cfg = json.load(f)
+                    result.append((fn, cfg))
+                except Exception:
+                    pass
+    return result
+
+
 def load_active_configs():
+    """Load only configs whose symbol/timeframe is active in settings.json.
+    Used by the live bot and portfolio optimizer."""
     configs_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
     active_pairs = None
     try:

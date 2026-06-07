@@ -1,13 +1,13 @@
-import os, sys, json, argparse, math
+﻿import os, sys, json, argparse, math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_active_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
 
-load_configs = load_active_configs
+load_configs = load_all_configs
 
 PARAM_RANGES = {
     'rr':       ('risk_reward_ratio',             [1.5, 2.0, 2.5, 3.0, 3.5, 4.0]),
