@@ -176,8 +176,8 @@ def _generate_chart(symbol: str, timeframe: str,
         res = run_backtest(df_full.copy(), strategy_params, risk_params,
                            start_capital=start_capital, return_trades=True,
                            trade_start_date=bt_trade_start)
-        # Visueller Datensatz: nur OOS-Periode (bricks werden auf gefilterten Daten neu gebaut)
-        ts_start = pd.to_datetime(start_date, utc=True)
+        # Visueller Datensatz: ab trade_start_date (OOS-Datum), nicht ab start_date
+        ts_start = pd.to_datetime(bt_trade_start, utc=True)
         df = df_full[df_full.index >= ts_start].copy()
     else:
         print(f'INFO: Lade OHLCV-Daten fuer {symbol} {timeframe}...')
