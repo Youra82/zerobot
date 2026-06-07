@@ -23,6 +23,30 @@ DB_PATH         = os.path.join(ARTIFACTS_PATH, 'db')
 TRADE_LOCK_FILE = os.path.join(DB_PATH, 'trade_lock.json')
 
 
+def _brick_state_path(symbol_timeframe: str) -> str:
+    safe = symbol_timeframe.replace('/', '-').replace(':', '-')
+    return os.path.join(DB_PATH, f'ear_brick_state_{safe}.json')
+
+
+def load_brick_state(symbol_timeframe: str) -> dict:
+    """Laedt persistierten EAR-Brick-State (lc, direction) oder leeres Dict."""
+    path = _brick_state_path(symbol_timeframe)
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_brick_state(symbol_timeframe: str, lc: float, direction: str):
+    """Speichert letzten Brick-Level und Richtung fuer naechsten Lauf."""
+    os.makedirs(DB_PATH, exist_ok=True)
+    with open(_brick_state_path(symbol_timeframe), 'w') as f:
+        json.dump({'lc': lc, 'direction': direction}, f)
+
+
 class Bias:
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
@@ -161,10 +185,16 @@ def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_confi
         recent_data.dropna(subset=['atr'], inplace=True)
 
         engine = EAREngine(settings=strat_params)
-        bricks = engine._build_bricks(recent_data)
+        brick_state = load_brick_state(symbol_timeframe)
+        bricks = engine._build_bricks(
+            recent_data,
+            init_lc=brick_state.get('lc'),
+            init_direction=brick_state.get('direction'),
+        )
         if not bricks:
             logger.info("Keine Bricks berechnet – Position hält.")
             return
+        save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
 
         # Entry-Zeitpunkt aus trade_lock lesen
         trade_lock      = load_or_create_trade_lock()
@@ -244,14 +274,25 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             except Exception as e:
                 logger.warning(f"HTF-Daten konnten nicht abgerufen werden: {e}")
 
-        # EAR Engine
-        engine         = EAREngine(settings=strat_params)
-        processed_data = engine.process_dataframe(recent_data)
+        # EAR Engine — mit persistiertem Brick-State (pfadunabhaengig)
+        engine      = EAREngine(settings=strat_params)
+        brick_state = load_brick_state(symbol_timeframe)
+        init_lc     = brick_state.get('lc')
+        init_dir    = brick_state.get('direction')
+
+        processed_data = engine.process_dataframe(
+            recent_data, init_lc=init_lc, init_direction=init_dir)
         current_candle = processed_data.iloc[-1]
 
         signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, market_bias)
 
         if not signal_side:
+            # State nach jedem Lauf speichern (auch wenn kein Signal)
+            raw_bricks = engine._build_bricks(
+                recent_data, init_lc=init_lc, init_direction=init_dir)
+            if raw_bricks:
+                save_brick_state(symbol_timeframe,
+                                 raw_bricks[-1]['close'], raw_bricks[-1]['direction'])
             logger.info("Kein EAR-Signal – überspringe.")
             return
 
@@ -291,7 +332,9 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         entry_price = signal_price or ticker['last']
 
         # SL = Open des Entry-Bricks (= Close des vorherigen Bricks = 1 Brick-Abstand)
-        bricks = engine._build_bricks(recent_data)
+        bricks = engine._build_bricks(recent_data, init_lc=init_lc, init_direction=init_dir)
+        if bricks:
+            save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
         if bricks and len(bricks) > 1:
             sl_price = bricks[-2]['close']  # vorheriges Brick-Level
         else:

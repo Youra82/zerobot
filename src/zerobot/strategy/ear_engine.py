@@ -40,8 +40,16 @@ class EAREngine:
         pb /= s; ps /= s
         return float(-pb * np.log2(pb) - ps * np.log2(ps))
 
-    def _build_bricks(self, df: pd.DataFrame) -> list:
-        """Baut EAR-Bricks aus OHLCV. Gibt Liste von Dicts zurueck."""
+    def _build_bricks(self, df: pd.DataFrame,
+                      init_lc: float = None,
+                      init_direction: str = None) -> list:
+        """
+        Baut EAR-Bricks aus OHLCV. Gibt Liste von Dicts zurueck.
+
+        init_lc / init_direction: persistierter State aus vorherigem Lauf.
+        Ohne diese Parameter startet die Berechnung bei closes[0] (pfadabhaengig).
+        Mit gespeichertem State ist die Brick-Struktur reproduzierbar.
+        """
         n = len(df)
         if n < 2:
             return []
@@ -58,8 +66,8 @@ class EAREngine:
         H_roll = pd.Series(H_raw).rolling(self.h_window, min_periods=1).mean().values
 
         bricks    = []
-        lc        = closes[0]
-        direction = None
+        lc        = init_lc        if init_lc        is not None else closes[0]
+        direction = init_direction if init_direction is not None else None
 
         for i in range(1, n):
             H     = float(H_roll[i])
@@ -108,20 +116,20 @@ class EAREngine:
 
         return bricks
 
-    def process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame,
+                          init_lc: float = None,
+                          init_direction: str = None) -> pd.DataFrame:
         """
         Haupt-Methode: verarbeitet OHLCV-DataFrame, fügt 'ear_signal' Spalte hinzu.
         ear_signal: 1=Long-Signal, -1=Short-Signal, 0=kein Signal
 
-        Signal: trend_min_bricks aufeinanderfolgende EAR-Bricks in gleicher
-        Richtung → Signal auf dem letzten Brick (Entropie steckt bereits in
-        der adaptiven Brick-Größe, kein zusätzlicher Squeeze-Filter nötig).
+        init_lc / init_direction: optionaler persistierter Brick-State.
         """
         df = df.copy()
         df['ear_signal'] = 0
         df['ear_H']      = np.nan
 
-        bricks = self._build_bricks(df)
+        bricks = self._build_bricks(df, init_lc=init_lc, init_direction=init_direction)
         if len(bricks) < self.trend_min_bricks:
             return df
 
