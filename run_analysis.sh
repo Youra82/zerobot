@@ -235,14 +235,31 @@ run_mode() {
 
     3)  echo -e "${GREEN}▶ Monte Carlo Simulation${NC}"
         if [ -z "$2" ]; then
-            DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
             CAP=$(ask_capital)
             read -p "Anzahl Simulationen [Standard: 5000]: " SIMS
             SIMS="${SIMS//[$'\r\n ']/}"
             if ! [[ "$SIMS" =~ ^[0-9]+$ ]]; then SIMS=5000; fi
+            OOS_FLAG=""
+            if [ -f "$SCRIPT_DIR/artifacts/results/last_oos_run.json" ]; then
+                OOS_START=$(python3 -c "import json; d=json.load(open('$SCRIPT_DIR/artifacts/results/last_oos_run.json')); print(d.get('oos_start',''))" 2>/dev/null)
+                if [ -n "$OOS_START" ]; then
+                    echo ""
+                    echo -e "  OOS-Test erkannt (dunkler Bereich ab ${YELLOW}$OOS_START${NC})"
+                    read -p "  OOS-Modus nutzen? (Ehrlicher — nur Trades die Bot nie gesehen hat) (j/n) [Standard: n]: " USE_OOS
+                    USE_OOS="${USE_OOS//[$'\r\n ']/}"
+                    if [[ "$USE_OOS" =~ ^[jJyY] ]]; then
+                        OOS_FLAG="--oos-mode"
+                        echo -e "  ${GREEN}OOS-Modus aktiv — shuffelt nur Trades aus dem dunklen Bereich${NC}"
+                    fi
+                fi
+            fi
+            if [ -z "$OOS_FLAG" ]; then
+                DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
+            fi
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/monte_carlo.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP" --simulations "$SIMS" $NO_TELEGRAM
+            --start-date "${SD:-2023-01-01}" --end-date "${ED:-$(date +%Y-%m-%d)}" \
+            --capital "$CAP" --simulations "$SIMS" $OOS_FLAG $NO_TELEGRAM
         ;;
 
     4)  echo -e "${GREEN}▶ Bootstrap Signifikanztest${NC}"

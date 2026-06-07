@@ -111,6 +111,23 @@ def create_chart(final_pcts, max_dds, symbol, n_sims, p5, p50, p95):
     return path
 
 
+OOS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
+
+
+def load_oos_pnl_pcts() -> dict:
+    """Liest OOS-Trade-Returns aus last_oos_run.json. Key = config_file."""
+    if not os.path.exists(OOS_FILE):
+        return {}
+    try:
+        with open(OOS_FILE) as f:
+            data = json.load(f)
+        return {r['config_file']: r.get('oos_pnl_pcts', [])
+                for r in data.get('results', [])
+                if r.get('oos_pnl_pcts')}
+    except Exception:
+        return {}
+
+
 def main():
     parser = argparse.ArgumentParser(description='Monte Carlo Simulation')
     parser.add_argument('--start-date', default='2023-01-01')
@@ -118,6 +135,8 @@ def main():
     parser.add_argument('--capital', type=float, default=100)
     parser.add_argument('--simulations', type=int, default=5000)
     parser.add_argument('--no-telegram', action='store_true')
+    parser.add_argument('--oos-mode', action='store_true',
+                        help='Nutze OOS-Trades aus last_oos_run.json statt In-Sample-Backtest')
     args = parser.parse_args()
 
     configs = load_configs()
@@ -125,12 +144,19 @@ def main():
         print("Keine Configs gefunden.")
         return
 
+    oos_pnl_map = load_oos_pnl_pcts() if args.oos_mode else {}
+    if args.oos_mode and not oos_pnl_map:
+        print("  Hinweis: --oos-mode aktiv aber last_oos_run.json leer/nicht vorhanden.")
+        print("  Bitte zuerst run_pipeline.sh mit OOS-Datum ausführen.")
+        return
+
     rng = np.random.default_rng(42)
 
+    mode_label = "OOS-Modus (dunkler Bereich)" if args.oos_mode else f"{args.start_date} bis {args.end_date} (In-Sample)"
     print("\n" + "=" * 70)
     print("  MONTE CARLO SIMULATION")
     print("=" * 70)
-    print(f"  Zeitraum: {args.start_date} bis {args.end_date}")
+    print(f"  Modus:   {mode_label}")
     print(f"  Kapital: {args.capital} USDT  |  Simulationen: {args.simulations}")
     print()
 
@@ -145,28 +171,47 @@ def main():
         strategy  = cfg.get('strategy', {})
         risk      = cfg.get('risk', {})
 
-        data = load_data(symbol, timeframe, args.start_date, args.end_date)
-        if data.empty or len(data) < 20:
-            print(f"\n  {fn}: Keine Daten.")
-            continue
+        # OOS-Modus: direkt gespeicherte Prozent-Returns verwenden
+        if args.oos_mode:
+            pnl_pct_list = oos_pnl_map.get(fn, [])
+            if len(pnl_pct_list) < 5:
+                print(f"\n  {fn}: Keine/zu wenige OOS-Trades ({len(pnl_pct_list)}) — überspringe.")
+                continue
+            oos_trades_n = len(pnl_pct_list)
+            wins         = sum(1 for r in pnl_pct_list if r > 0)
+            wr_orig      = wins / oos_trades_n * 100
+            print(f"\n{'─'*70}")
+            print(f"  Config: {fn}  [{symbol} {timeframe}]  ← OOS-Trades")
+            print(f"  OOS-Trades: {oos_trades_n} | WR {wr_orig:.1f}%  (aus dunklem Bereich)")
+            print(f"{'─'*70}")
+        else:
+            data = load_data(symbol, timeframe, args.start_date, args.end_date)
+            if data.empty or len(data) < 20:
+                print(f"\n  {fn}: Keine Daten.")
+                continue
 
-        res = run_backtest(data.copy(), strategy, risk, args.capital, return_trades=True)
-        trades = res.get('trades', [])
-        if len(trades) < 10:
-            print(f"\n  {fn}: Zu wenige Trades ({len(trades)}) fuer Monte Carlo (min. 10).")
-            continue
+            res = run_backtest(data.copy(), strategy, risk, args.capital, return_trades=True)
+            trades = res.get('trades', [])
+            if len(trades) < 10:
+                print(f"\n  {fn}: Zu wenige Trades ({len(trades)}) fuer Monte Carlo (min. 10).")
+                continue
+            print(f"\n{'─'*70}")
+            print(f"  Config: {fn}  [{symbol} {timeframe}]")
+            print(f"  Original: {len(trades)} Trades | WR {res['win_rate']:.1f}% | PnL {res['total_pnl_pct']:.1f}%")
+            print(f"{'─'*70}")
 
-        # Prozentuale Returns: pnl_usd / capital_before_trade
-        # capital_before = capital_after - pnl_usd
-        pnl_pct_list = []
-        for t in trades:
-            cap_after = t.get('capital_after', args.capital)
-            pnl_usd   = t.get('pnl_usd', 0.0)
-            cap_before = cap_after - pnl_usd
-            if cap_before > 0:
-                pnl_pct_list.append(pnl_usd / cap_before)
-        if len(pnl_pct_list) < 10:
-            print(f"\n  {fn}: Zu wenige valide Trades fuer Monte Carlo.")
+        # Im In-Sample-Modus: Prozentuale Returns aus Trade-Liste berechnen
+        if not args.oos_mode:
+            pnl_pct_list = []
+            for t in trades:
+                cap_after  = t.get('capital_after', args.capital)
+                pnl_usd    = t.get('pnl_usd', 0.0)
+                cap_before = cap_after - pnl_usd
+                if cap_before > 0:
+                    pnl_pct_list.append(pnl_usd / cap_before)
+
+        if len(pnl_pct_list) < 5:
+            print(f"\n  {fn}: Zu wenige valide Trades — überspringe.")
             continue
 
         final_pcts = []
@@ -187,10 +232,6 @@ def main():
         p75 = float(np.percentile(final_arr, 75))
         p95 = float(np.percentile(final_arr, 95))
 
-        print(f"\n{'─'*70}")
-        print(f"  Config: {fn}  [{symbol} {timeframe}]")
-        print(f"  Original: {len(trades)} Trades | WR {res['win_rate']:.1f}% | PnL {res['total_pnl_pct']:.1f}%")
-        print(f"{'─'*70}")
         print(f"  Perzentil-Verteilung der finalen PnL%:")
         print(f"    5.  Pz (Worst-Case):  {p5:>8.1f}%")
         print(f"   25.  Pz:               {p25:>8.1f}%")

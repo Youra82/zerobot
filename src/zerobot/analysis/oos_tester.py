@@ -127,6 +127,16 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
         oos_dd       = oos_result.get('max_drawdown_pct', 0) * 100
         oos_capital  = oos_result.get('end_capital', start_capital)
 
+        # Prozentuale Returns pro Trade (fuer Monte Carlo)
+        raw_trades = oos_result.get('trades', [])
+        pnl_pcts   = []
+        for t in raw_trades:
+            cap_after  = t.get('capital_after', start_capital)
+            pnl_usd    = t.get('pnl_usd', 0.0)
+            cap_before = cap_after - pnl_usd
+            if cap_before > 0:
+                pnl_pcts.append(round(pnl_usd / cap_before, 8))
+
         # Verdict
         if oos_pnl > 0 and oos_dd < 30:
             verdict = f"{GREEN}✅ Robust{NC}"
@@ -150,6 +160,7 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
             'oos_win_rate':  round(oos_wr, 2),
             'oos_max_dd':    round(oos_dd, 2),
             'oos_capital':   round(oos_capital, 4),
+            'oos_pnl_pcts':  pnl_pcts,
         })
 
     return results
