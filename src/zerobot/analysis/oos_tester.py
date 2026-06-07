@@ -202,7 +202,18 @@ def main():
     )
 
     if not results:
-        print(f"\n{RED}Keine Configs gefunden — zuerst run_pipeline.sh ausführen.{NC}")
+        configs_exist = os.path.isdir(CONFIGS_DIR) and any(
+            f.startswith('config_') and f.endswith('.json')
+            for f in os.listdir(CONFIGS_DIR)
+        ) if os.path.isdir(CONFIGS_DIR) else False
+        if configs_exist:
+            print(f"\n{YELLOW}⚠  Alle Configs übersprungen (keine Daten verfügbar).{NC}")
+            print(f"  Prüfe ob die Symbole auf Bitget für den gewählten Zeitraum verfügbar sind.")
+        else:
+            print(f"\n{RED}Keine Config-Dateien gefunden.{NC}")
+            print(f"  Mögliche Ursachen:")
+            print(f"    - Optimizer fand keine valide Config (alle Trials gepruned)")
+            print(f"    - Tipp: Modus 2 (Best-Profit) wählen oder Min-WR reduzieren")
         return
 
     # Zusammenfassung

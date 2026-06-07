@@ -197,6 +197,11 @@ def main():
 
         valid_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
         if not valid_trials:
+            pruned = sum(1 for t in study.trials if t.state == optuna.trial.TrialState.PRUNED)
+            print(f"\n  ⚠ Keine valide Konfiguration gefunden ({pruned}/{N_TRIALS} Trials gepruned).")
+            if OPTIM_MODE == "strict":
+                print(f"  Tipp: Min-WR {MIN_WIN_RATE_CONSTRAINT:.0f}% ist für EAR meist zu streng (typisch 20-35%).")
+                print(f"        Versuche Modus 2 (Best-Profit) oder reduziere Min-WR auf 20-25%.")
             run_results['failed'].append({'symbol': symbol, 'timeframe': timeframe, 'reason': 'no_valid_trials'})
             continue
 
