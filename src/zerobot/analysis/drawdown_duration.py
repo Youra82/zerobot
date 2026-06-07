@@ -13,12 +13,12 @@ def analyze_drawdowns(trades, start_capital):
     if not trades:
         return []
 
-    sorted_trades = sorted(trades, key=lambda t: t['timestamp'])
+    sorted_trades = sorted(trades, key=lambda t: t.get('exit_time', t.get('ts', '')))
     equity = [start_capital]
     timestamps = [None]
     for t in sorted_trades:
-        equity.append(equity[-1] + t['pnl_usd'])
-        timestamps.append(t['timestamp'])
+        equity.append(equity[-1] + t.get('pnl_usd', 0))
+        timestamps.append(t.get('exit_time', t.get('ts', None)))
 
     dd_periods = []
     peak_idx   = 0

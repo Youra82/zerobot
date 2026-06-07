@@ -145,7 +145,7 @@ def main():
         records = []
         for t in trades:
             try:
-                ts = pd.to_datetime(t['timestamp'], utc=True)
+                ts = pd.to_datetime(t.get('exit_time', ''), utc=True)
                 records.append({'week': ts.isocalendar()[0] * 100 + ts.isocalendar()[1],
                                 'pnl_usd': t['pnl_usd']})
             except Exception:

@@ -166,7 +166,7 @@ def main():
         regime_stats = {}
         for t in trades:
             try:
-                ts = pd.to_datetime(t['timestamp'], utc=True)
+                ts = pd.to_datetime(t.get('exit_time', ''), utc=True)
                 idx = data.index.get_indexer([ts], method='nearest')[0]
                 if idx >= 0 and idx < len(data):
                     regime = data.iloc[idx]['regime']

@@ -138,7 +138,7 @@ def main():
             t['fn'] = fn
             t['timeframe'] = timeframe
             try:
-                t['ts'] = pd.to_datetime(t['timestamp'], utc=True)
+                t['ts'] = pd.to_datetime(t.get('exit_time', ''), utc=True)
             except Exception:
                 t['ts'] = None
 

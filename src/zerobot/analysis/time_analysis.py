@@ -169,7 +169,7 @@ def main():
 
         for t in trades:
             try:
-                ts   = pd.to_datetime(t['timestamp'], utc=True)
+                ts   = pd.to_datetime(t.get('exit_time', ''), utc=True)
                 hour = ts.hour
                 sess = get_session(hour)
                 hour_stats[hour]['total'] += 1

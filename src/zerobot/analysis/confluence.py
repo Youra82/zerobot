@@ -121,7 +121,7 @@ def main():
         trades = res.get('trades', [])
         for t in trades:
             try:
-                t['ts'] = pd.to_datetime(t['timestamp'], utc=True)
+                t['ts'] = pd.to_datetime(t.get('exit_time', ''), utc=True)
                 t['fn'] = fn
                 all_trades.append(t)
             except Exception:

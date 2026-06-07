@@ -177,7 +177,7 @@ def main():
     trade_regimes = []
     for t in trades:
         try:
-            ts  = pd.to_datetime(t['timestamp'], utc=True)
+            ts  = pd.to_datetime(t.get('exit_time', ''), utc=True)
             idx = data.index.get_indexer([ts], method='nearest')[0]
             if idx >= 0 and idx < len(data):
                 adx_val = data.iloc[idx]['adx']
