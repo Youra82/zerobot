@@ -317,9 +317,33 @@ def create_chart(results, week_starts, capital):
     return path
 
 
+def detect_dark_period(configs):
+    """
+    Liest OOS-Datum aus _meta der Configs (gesetzt von run_pipeline.sh).
+    Gibt (is_start, is_end, oos_start, oos_end) zurück, oder None wenn nicht vorhanden.
+    Bei mehreren Configs: spätestes oos_start (konservativster echter Dark-Period).
+    """
+    best = None
+    for fn, cfg in configs:
+        meta = cfg.get('_meta', {})
+        oos_s = meta.get('oos_start') or meta.get('oos_date')
+        if not oos_s:
+            continue
+        if best is None or oos_s > best['oos_start']:
+            best = {
+                'is_start':  meta.get('is_start', '?'),
+                'is_end':    meta.get('is_end',   '?'),
+                'oos_start': oos_s,
+                'oos_end':   meta.get('oos_end',  datetime.now().strftime('%Y-%m-%d')),
+                'symbol':    cfg.get('market', {}).get('symbol', fn),
+            }
+    return best
+
+
 def main():
     parser = argparse.ArgumentParser(description='Walk-Forward Lookback-Analyse (ZeroBot EAR)')
-    parser.add_argument('--start-date',  default='2023-01-01')
+    parser.add_argument('--start-date',  default=None,
+                        help='OOS-Startdatum (Dark Period). Leer = Auto aus Config-Metadata.')
     parser.add_argument('--end-date',    default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--capital',     type=float, default=100.0)
     parser.add_argument('--max-dd',      type=float, default=30.0,
@@ -334,21 +358,56 @@ def main():
         print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
         return
 
+    # ── Dark Period: aus Config-Metadata oder manuell
+    dark = detect_dark_period(configs)
+    if args.start_date:
+        # manuell überschrieben
+        oos_start_str = args.start_date
+        oos_end_str   = args.end_date
+        dark_source   = f'manuell ({oos_start_str})'
+    elif dark:
+        oos_start_str = dark['oos_start']
+        oos_end_str   = args.end_date
+        dark_source   = f'Auto aus Config ({dark["symbol"]})'
+    else:
+        oos_start_str = '2023-01-01'
+        oos_end_str   = args.end_date
+        dark_source   = 'kein _meta gefunden, Fallback'
+
+    oos_weeks_total = max(0,
+        (pd.to_datetime(oos_end_str) - pd.to_datetime(oos_start_str)).days // 7)
+
     print(f"\n{'=' * 65}")
     print(f"  {B}ZeroBot EAR — Walk-Forward Lookback-Analyse{NC}")
     print(f"{'=' * 65}")
     print(f"  Frage: Wie viele Wochen Lookback für den Auto-Optimizer?")
-    print(f"  Zeitraum:   {args.start_date} → {args.end_date}")
-    print(f"  Kapital:    {args.capital} USDT  |  Max-DD: {args.max_dd}%")
-    print(f"  Configs:    {len(configs)}")
-    print(f"  Lookbacks:  {LOOKBACK_WINDOWS} Wochen")
+    print()
+    if dark and not args.start_date:
+        print(f"  {G}▶ Dark Period (Pipeline OOS) — auto-erkannt:{NC}")
+        print(f"  ┌─────────────────────────────────────────────────────────┐")
+        print(f"  │  IS  (Training):  {dark['is_start']}  →  {dark['is_end']}")
+        print(f"  │  OOS (Dark):      {dark['oos_start']}  →  {oos_end_str}  ◄ Walk-Forward")
+        print(f"  └─────────────────────────────────────────────────────────┘")
+        print(f"  IS-Daten dienen als Lookback-Quelle, OOS wird getestet.")
+    else:
+        print(f"  Zeitraum:  {oos_start_str} → {oos_end_str}  ({dark_source})")
+    print()
+    print(f"  OOS-Wochen gesamt:  {oos_weeks_total}W")
+    print(f"  Kapital:            {args.capital} USDT  |  Max-DD: {args.max_dd}%")
+    print(f"  Configs:            {len(configs)}")
+    print(f"  Lookbacks:          {LOOKBACK_WINDOWS} Wochen")
+
+    # Hinweis auf Lookbacks die mehr OOS-Wochen als verfügbar brauchen
+    thin = [w for w in LOOKBACK_WINDOWS if oos_weeks_total - w < 4]
+    if thin:
+        print(f"  {Y}⚠ Lookbacks {thin}W → <4 OOS-Wochen (zu wenig Daten erwartet){NC}")
     print()
 
     # ── Daten laden (einmalig, für die volle Periode + max. Lookback + Warmup)
     max_lookback = max(LOOKBACK_WINDOWS)
-    full_start_dt = (pd.to_datetime(args.start_date, utc=True)
+    full_start_dt = (pd.to_datetime(oos_start_str, utc=True)
                      - timedelta(weeks=max_lookback + WARMUP_WEEKS))
-    full_end_str  = args.end_date
+    full_end_str  = oos_end_str
     full_start_str = full_start_dt.strftime('%Y-%m-%d')
 
     print("  Lade Marktdaten...")
@@ -358,8 +417,8 @@ def main():
         return
 
     # ── OOS-Zeitraum (alle Lookbacks auf gleichem Zeitraum)
-    oos_start_dt = pd.to_datetime(args.start_date, utc=True)
-    oos_end_dt   = pd.to_datetime(args.end_date, utc=True)
+    oos_start_dt = pd.to_datetime(oos_start_str, utc=True)
+    oos_end_dt   = pd.to_datetime(oos_end_str, utc=True)
 
     week_starts = []
     w = oos_start_dt
