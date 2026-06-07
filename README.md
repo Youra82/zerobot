@@ -1,7 +1,7 @@
-# ZeroBot — Renko Quant-Trading Bot
+# ZeroBot — EAR Quant-Trading Bot
 
-Ein quantitativer Crypto-Trading-Bot auf Basis von Renko-Charts.
-Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert.
+Ein quantitativer Crypto-Trading-Bot auf Basis von **Entropy-Adaptive Renko (EAR)**.
+Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert und gegen einen echten Out-of-Sample Dark Period validiert.
 
 > **Disclaimer:** Diese Software ist experimentell und dient ausschließlich Forschungszwecken.
 > Der Handel mit Kryptowährungen birgt erhebliche finanzielle Risiken. Nutzung auf eigene Gefahr.
@@ -10,26 +10,26 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 
 ## Grundidee
 
-Klassische Candlestick-Charts rauschen durch Zeit-Noise. **Renko-Charts filtern Zeit komplett heraus** — eine neue Brick entsteht erst wenn der Kurs sich um einen definierten Betrag bewegt:
+Klassische Candlestick-Charts rauschen durch Zeit-Noise. **Renko-Bricks filtern Zeit heraus** — ein neuer Brick entsteht erst wenn der Kurs sich um einen definierten Betrag bewegt. EAR erweitert dies: Die Brick-Größe passt sich automatisch der aktuellen Markt-Entropie (Shannon-Entropie der Renditen) an — in ruhigen Märkten kleinere Bricks, in volatilen Märkten größere.
 
 ```
 Normale 4h-Kerze:  Kurs steigt 0.1% → Kerze gezeichnet  (viel Rauschen)
-Renko-Brick:       Brick erst wenn Kurs > ATR × Multiplier steigt  (nur Bewegung zählt)
+EAR-Brick:         Brick erst wenn Kurs > close × base_pct × (1 + k_entropy × H_rolling)
+                   H_rolling = Shannon-Entropie der letzten h_window Renditen
 ```
 
 Der Optimizer findet pro Symbol/Timeframe die besten Werte für:
 
 ```
-atr_multiplier       — Brick-Größe: ATR × X  (0.5–3.0)
-trend_min_bricks     — Mindest-Bricks für Trend-Bestätigung  (2–6)
-reversal_bricks      — Bricks für Reversal-Signal  (1–3)
-vol_filter_enabled   — Volumen-Bestätigung ja/nein
+base_pct             — Basis-Brick-Größe als % des Kurses  (0.002–0.010)
+k_entropy            — Entropie-Gewichtung: wie stark passt sich die Brick-Größe an  (0.4–1.5)
+h_window             — Entropie-Glättungsfenster (Anzahl Renditen)  (5–20)
+trend_min_bricks     — Mindest-Bricks in Trendrichtung für Signal-Bestätigung  (2–6)
+trend_reversal_bricks — Bricks gegen Trend für Entry-Trigger  (1–3)
 
 atr_multiplier_sl    — SL-Abstand vom Entry in ATR-Vielfachen  (1.5–5.0)
 risk_reward_ratio    — TP = SL × RRR  (1.5–5.0)
 leverage             — Hebel  (5–20×)
-trailing_stop_activation_rr    — Ab welchem R wird Trailing Stop aktiviert  (1.0–3.0)
-trailing_stop_callback_rate_pct — Trailing Stop Callback in %  (0.2–2.0)
 ```
 
 ---
@@ -52,19 +52,20 @@ zerobot/
 │
 └── src/zerobot/
     ├── strategy/
-    │   ├── renko_engine.py        # Renko-Brick-Berechnung aus OHLCV
-    │   ├── renko_logic.py         # Signal-Erkennung auf Brick-Sequenzen
+    │   ├── ear_engine.py          # EAR-Brick-Berechnung (Entropie-adaptiv) aus OHLCV
+    │   ├── ear_logic.py           # Signal-Erkennung auf EAR-Brick-Sequenzen
     │   ├── run.py                 # Entry Point für eine Strategie
     │   └── configs/               # Optimierte Configs pro Symbol/TF (in Git)
     │
     ├── analysis/
-    │   ├── optimizer.py               # Optuna Parameter-Suche
-    │   ├── backtester.py              # Historische Simulation (fee_override, return_trades)
+    │   ├── optimizer.py               # Optuna Parameter-Suche (EAR-Parameter)
+    │   ├── backtester.py              # Historische Simulation (trade_start_date für Dark Period)
+    │   ├── oos_tester.py              # Pipeline OOS-Test: schreibt oos_start in Config _meta
     │   ├── portfolio_simulator.py     # Portfolio-Simulation (gemeinsamer Kapital-Pool)
     │   ├── portfolio_optimizer.py     # Beste Strategie-Kombination finden
     │   ├── show_results.py            # Tabellen-Output (Einzel + Portfolio)
     │   │
-    │   ├── walk_forward.py            # OOS-Test auf N Zeitfenstern
+    │   ├── walk_forward.py            # Rolling Walk-Forward Lookback-Analyse (Dark Period)
     │   ├── fee_impact.py              # Gebühren-Sweep → Break-Even Fee
     │   ├── monte_carlo.py             # 5000 Permutationen → Ruin-Risiko
     │   ├── bootstrap_test.py          # Binomial-Signifikanztest (WR > Zufall?)
@@ -99,13 +100,17 @@ zerobot/
 ```
 Historische OHLCV-Daten (Bitget via CCXT)
     ↓
-ATR berechnen → Renko-Bricks konstruieren
+Shannon-Entropie der Renditen berechnen → EAR-Bricks konstruieren
+(Brick-Größe = close × base_pct × (1 + k_entropy × H_rolling))
     ↓
-Optuna: 200+ Trials — sucht beste Parameter-Kombination
+Optuna: 200+ Trials — sucht beste EAR-Parameter-Kombination
     ↓
 Constraints: MaxDD ≤ Limit | WinRate ≥ Minimum | Trades ≥ 15
     ↓
+Optional: OOS-Test auf Dark Period (Daten nach Cutoff-Datum)
+    ↓
 Beste Config gespeichert: src/zerobot/strategy/configs/config_SYMBOL_TF.json
+Config _meta enthält: train_start, train_end, oos_start, oos_end, oos_pnl_pct
 ```
 
 > Der Optimizer vergleicht jede neue Config mit der bestehenden.
@@ -116,26 +121,23 @@ Beste Config gespeichert: src/zerobot/strategy/configs/config_SYMBOL_TF.json
 ```
 Jeder Cronjob-Lauf:
   1. Aktuelle OHLCV-Kerzen laden
-  2. Renko-Bricks aus letzten N Kerzen berechnen
-  3. Signal prüfen: Trend-Bricks + Reversal → Long oder Short?
-  4. Volumen-Filter: Handelsvolumen > min_vol_ratio × MA? (falls aktiviert)
-  5. Entry: Trigger-Limit-Order (0.05% Delta)
-  6. SL: ATR × atr_multiplier_sl vom Entry-Preis
-  7. TP: SL × risk_reward_ratio
-  8. Trailing Stop: aktiviert bei trailing_stop_activation_rr × R
+  2. EAR-Bricks berechnen (Entropie-adaptive Brick-Größe)
+  3. Signal prüfen: trend_min_bricks Trend-Bricks + trend_reversal_bricks Gegen-Bricks
+  4. Entry: Trigger-Limit-Order (0.05% Delta vom letzten Brick-Close)
+  5. SL: ATR × atr_multiplier_sl vom Entry-Preis
+  6. TP: SL × risk_reward_ratio
 ```
 
 ### Beispiel-Signal
 
 ```
-[ZeroBot Signal]
-  Symbol:    SOL/USDT:USDT (6h)
+[ZeroBot EAR Signal]
+  Symbol:    SOL/USDT:USDT (4h)
   Richtung:  LONG
-  Renko ATR: 1.12 (Brick-Größe = 1.12 × ATR)
+  EAR-Brick: close × 0.005 × (1 + 0.8 × H)  ≈ 0.72 USDT pro Brick
   Entry:     ~148.20 USDT (Trigger-Limit)
   SL:         144.80 USDT (ATR × 2.3 unter Entry)
   TP:         155.00 USDT (SL × 2.1 RRR)
-  Trailing:   aktiviert ab 1.5×R, Callback 0.8%
   Hebel:      12×
 ```
 
@@ -302,25 +304,54 @@ Analysiert ausschließlich die in `settings.json` unter `active_strategies` eing
 
 ---
 
-#### 1) Walk-Forward Out-of-Sample Test
+#### 1) Walk-Forward Lookback-Analyse (Dark Period)
 
-**Was es ist:** Der härteste Validierungstest gegen Overfitting. Der gesamte Datenzeitraum wird in N gleich große Fenster aufgeteilt. Auf jedem Fenster wird die **bereits optimierte Config** unverändert getestet — kein Nachoptimieren.
+**Was es ist:** Der härteste Validierungstest gegen Overfitting. Simuliert den wöchentlichen Auto-Optimizer: Für jeden Lookback (1W, 2W, 4W, 8W, 12W, 26W) wird geprüft, welche Configs in den letzten N Wochen positiven Calmar hatten (In-Sample), und wie diese Configs in der darauffolgenden Woche performen (Out-of-Sample). Alle Lookbacks werden auf demselben OOS-Zeitraum getestet — kein Lookahead.
+
+**Dark Period — kein Lookahead:**
+Der Test läuft ausschließlich auf dem **dunklen Bereich** der Pipeline — also Daten nach dem Optimierungs-Cutoff. Dieser wird automatisch aus der Config-Metadata (`_meta.oos_start`) erkannt. Die IS-Daten (vor dem OOS-Datum) dienen nur als Lookback-Quelle für die Config-Selektion.
+
+```
+Pipeline:    [─── IS (Training) ────────────────────] [── OOS (Dark) ──►]
+                  2023-03-01          2026-02-28         2026-03-01  heute
+
+Walk-Forward:  IS rollt wöchentlich vorwärts ─────────►
+               Jede Woche: IS → beste Config wählen → OOS → Equity akkumulieren
+```
 
 **Was ausgewertet wird:**
-- PnL% und Win-Rate pro Fenster
-- Konsistenz-Score = Standardabweichung der Fenster-PnL (niedrig = gut)
-- Anteil profitabler Fenster (z.B. 4/5 = 80%)
-- OOS-Gesamt-PnL über alle Fenster
+- Pro Lookback (1W / 2W / 4W / 8W / 12W / 26W): Gesamt-OOS-PnL%, MaxDD%, Calmar, Trades, WR, Leerwochen
+- Leerwochen = Wochen in denen keine Config den IS-Filter bestand (kein Trade → Kapital geschützt)
+- Bester Lookback = höchster Calmar mit positivem OOS-PnL → wird automatisch in `settings.json` geschrieben
 
 **Kennzahlen erklärt:**
 | Kennzahl | Bedeutung | Gut wenn... |
 |---|---|---|
-| **Konsistenz-Score (Std PnL)** | Streuung der Fenster-Ergebnisse. Niedriger Wert = Config verhält sich überall ähnlich | < 15% |
-| **Profitable Fenster** | Anteil der Fenster mit positivem PnL | ≥ 60% |
-| **OOS-PnL** | Gesamtperformance aus reinen Out-of-Sample-Daten | > 0% |
-| **IS/OOS-Verhältnis** | Verhältnis: In-Sample-PnL / OOS-PnL. Wert >> 1 = starkes Overfitting-Signal | nahe 1.0 |
+| **OOS-PnL%** | Gesamtperformance im Dark Period (nie vom Optimizer gesehen) | > 0% |
+| **Calmar** | OOS-PnL% / MaxDD% — risikobereingte Rendite | > 1.0 |
+| **MaxDD%** | Maximaler Kapitalrückgang im OOS-Zeitraum | < 25% |
+| **Leerwochen** | Wochen ohne selektierte Config — keine Trades, Schutz | niedrig = stabiles System |
+| **WR** | Win-Rate der OOS-Trades (EAR: oft 15–25%, kompensiert durch R:R) | relativ zu R:R |
 
-**Interpretation:** Wenn der Backtest +150% zeigt aber OOS nur +20% → Overfitting. Konsistenz-Score > 40% → Config ist marktphaseabhängig, nicht generell.
+**Wie der beste Lookback in den Auto-Optimizer fließt:**
+```
+settings.json → optimization_settings → backtest_lookback_weeks: 1
+                                                  ↑
+                              Ergebnis dieser Analyse (bester OOS-Calmar)
+```
+Der wöchentliche Auto-Optimizer (`run_portfolio_optimizer.py`) liest diesen Wert und schaut exakt N Wochen zurück wenn er entscheidet, welche Configs aktiv bleiben.
+
+**Interpretation:**
+- 1W Lookback besser als 4W/8W → das System reagiert besser auf kurzfristige Regime-Wechsel als auf langfristige Trends
+- Alle Lookbacks negativ → Config overfittet auf Trainingsperiode, Pipeline neu ausführen
+- Leerwochen > 50% bei kurzen Lookbacks (1W/2W) → zu wenig Trades im IS-Fenster (min_trades erhöhen oder kürzeres TF wählen)
+
+**Beispiel-Output:**
+```
+★ Bester Lookback: 1 Wochen
+  Calmar: 1.7  |  PnL: +16.4%  |  MaxDD: 9.8%  |  Trades: 129  |  WR: 18.6%
+→ settings.json aktualisiert: backtest_lookback_weeks = 1
+```
 
 ---
 
@@ -662,39 +693,39 @@ Analysiert ausschließlich die in `settings.json` unter `active_strategies` eing
 
 ---
 
-### Renko-Schnell-Sweeps (kein Walk-Forward — direktes Feedback)
+### EAR-Schnell-Sweeps (kein Walk-Forward — direktes Feedback auf dem vollen Zeitraum)
 
 ---
 
-#### 20) Brick-Größen-Sweep (ATR-Multiplier 0.5–2.5)
+#### 20) base_pct-Sweep (Basis-Brick-Größe 0.002–0.010)
 
-**Was es ist:** Testet `atr_multiplier` von 0.5 bis 2.5 in 0.25-Schritten auf dem vollen Datenzeitraum. Findet schnell den besten Brick-Größen-Bereich für ein Symbol.
+**Was es ist:** Testet `base_pct` von 0.002 bis 0.010 in Schritten auf dem vollen Datenzeitraum. `base_pct` bestimmt die minimale Brick-Größe (in % des Kurses). Klein = viele kleine Bricks (sensitiv), groß = wenige große Bricks (robuster).
 
-**Kennzahlen:** PnL%, Trades, Win-Rate, Max-DD pro Multiplier-Wert. Nicht OOS-validiert — nur als erstes Orientierungsfeedback verwenden.
-
----
-
-#### 21) Trend-Längen-Sweep (trend_min_bricks 2–6)
-
-**Was es ist:** Testet wie viele Trend-Bricks nötig sind bevor ein Signal gültig wird. 2 = frühe Signale (viele, weniger sicher), 6 = späte Signale (wenige, sicherer).
+**Kennzahlen:** PnL%, Trades, Win-Rate, Max-DD pro base_pct-Wert. Nicht OOS-validiert — als erstes Orientierungsfeedback vor dem Optimizer verwenden.
 
 ---
 
-#### 22) Reversal-Bricks-Sweep (reversal_bricks 1–4)
+#### 21) trend_min_bricks-Sweep (2–6)
 
-**Was es ist:** Testet wie viele Gegen-Bricks für ein Reversal-Signal nötig sind. 1 = jeder einzelne Gegen-Brick triggert, 4 = erst nach 4 Bricks gegen den Trend.
+**Was es ist:** Testet wie viele EAR-Bricks in Trendrichtung nötig sind bevor das Signal gültig ist. 2 = frühe Signale (viele, weniger sicher), 6 = späte Signale (wenige, sicherer). Direkt auf dem vollen Zeitraum — nicht Walk-Forward.
 
 ---
 
-#### 23) Volumen-Filter Vergleich
+#### 22) k_entropy-Sweep (Entropie-Gewichtung 0.4–1.5)
 
-**Was es ist:** Vergleicht direkt: Mit Volumen-Filter ON vs. OFF. Schneller Überblick ob der Volumen-Filter für diesen Coin/TF überhaupt nützlich ist.
+**Was es ist:** `k_entropy` bestimmt wie stark die Brick-Größe auf Markt-Entropie reagiert. k=0 = feste Brick-Größe (klassisches Renko), k=1.5 = starke Anpassung an Volatilitätsregime. Sweep findet den besten Wert für diesen Coin.
+
+---
+
+#### 23) h_window-Sweep (Entropie-Glättung 5–20)
+
+**Was es ist:** `h_window` ist die Anzahl der Renditen über die die Shannon-Entropie berechnet wird. Klein = reaktiv (springt schnell), groß = geglättet (stabiler). Sweep findet den optimalen Wert.
 
 ---
 
 #### 24) Timeframe-Vergleich
 
-**Was es ist:** Simuliert 1h, 2h, 4h, 6h, 1d mit der aktuellen Config (ohne Neuoptimierung) auf demselben Symbol. Zeigt welcher Timeframe für diesen Coin am besten passt.
+**Was es ist:** Simuliert 1h, 2h, 4h, 6h, 1d mit der aktuellen EAR-Config (ohne Neuoptimierung) auf demselben Symbol. Zeigt welcher Timeframe für diesen Coin am besten passt.
 
 **Kennzahlen:** PnL%, Win-Rate, Max-DD, Trades pro Timeframe. Hinweis: Nicht OOS-validiert, Config ist auf den Original-TF optimiert.
 
