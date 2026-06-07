@@ -111,10 +111,12 @@ def slice_data(cache, symbol, tf, start_dt, end_dt):
     return data[mask].copy()
 
 
-def select_portfolio(configs, cache, is_start, is_end, max_dd_pct, min_candles=20):
+def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
+                     min_candles=20, min_trades=2):
     """
     In-Sample Portfolio-Selektion: wählt beste Config pro Symbol
     anhand Calmar über das Lookback-Fenster.
+    min_trades: Mindest-Trades im IS-Fenster (sonst: zu wenig Evidenz).
     """
     symbol_best = {}
     for fn, cfg in configs:
@@ -132,9 +134,11 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct, min_candles=2
         except Exception:
             continue
 
-        pnl = res.get('total_pnl_pct', 0)
-        dd  = res.get('max_drawdown_pct', 0) * 100
-        if pnl <= 0 or dd > max_dd_pct:
+        pnl    = res.get('total_pnl_pct', 0)
+        dd     = res.get('max_drawdown_pct', 0) * 100
+        trades = res.get('trades_count', 0)
+
+        if trades < min_trades or pnl <= 0 or dd > max_dd_pct:
             continue
 
         calmar = compute_calmar(pnl, dd)
@@ -144,7 +148,8 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct, min_candles=2
     return list(symbol_best.values())
 
 
-def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital, max_dd_pct):
+def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
+                     max_dd_pct, min_trades=2):
     """
     Simuliert wöchentlichen Auto-Optimizer mit N Wochen Lookback.
     Returns: (curve, empty_weeks, total_trades, total_wins)
@@ -160,7 +165,9 @@ def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital, max_d
         is_start = week_start - timedelta(weeks=lookback_weeks)
         oos_end  = week_start + timedelta(weeks=1)
 
-        portfolio = select_portfolio(configs, cache, is_start, week_start, max_dd_pct)
+        portfolio = select_portfolio(configs, cache, is_start, week_start,
+                                     max_dd_pct, min_candles=20,
+                                     min_trades=min_trades)
 
         if not portfolio:
             empty_weeks += 1
@@ -308,6 +315,8 @@ def main():
     parser.add_argument('--capital',     type=float, default=100.0)
     parser.add_argument('--max-dd',      type=float, default=30.0,
                         help='Max Drawdown %% für Portfolio-Selektion [Standard: 30]')
+    parser.add_argument('--min-trades',  type=int,   default=5,
+                        help='Min. Trades pro Config im IS-Fenster [Standard: 5]')
     parser.add_argument('--no-telegram', action='store_true')
     args = parser.parse_args()
 
@@ -363,7 +372,8 @@ def main():
     for weeks in LOOKBACK_WINDOWS:
         print(f"  {C}Lookback {weeks:2d}W ...{NC}", end='', flush=True)
         curve, empty_w, n_trades, n_wins = run_walk_forward(
-            configs, cache, weeks, week_starts, args.capital, args.max_dd)
+            configs, cache, weeks, week_starts, args.capital, args.max_dd,
+            min_trades=args.min_trades)
         calmar, pnl_pct, max_dd = compute_stats(curve, args.capital)
         wr = n_wins / n_trades * 100 if n_trades > 0 else 0.0
         results[weeks] = (curve, empty_w, n_trades, n_wins)

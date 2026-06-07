@@ -215,13 +215,24 @@ run_mode() {
 
     case "$m" in
 
-    1)  echo -e "${GREEN}▶ Walk-Forward Out-of-Sample Test${NC}"
+    1)  echo -e "${GREEN}▶ Walk-Forward Lookback-Analyse${NC}"
+        echo "  Ermittelt den optimalen Lookback-Zeitraum für den wöchentlichen Auto-Optimizer."
+        echo "  Frage: Wie viele Wochen zurück soll der Optimizer schauen um das Portfolio zu wählen?"
+        echo "  Methode: Rolling Walk-Forward — IS → Config-Selektion → OOS-Equity akkumulieren."
+        echo "  Lookbacks: 1W, 2W, 4W, 8W, 12W, 26W (alle auf gleichem OOS-Zeitraum)"
+        echo ""
         if [ -z "$2" ]; then
             DATES=$(ask_dates); SD=$(echo $DATES | cut -d' ' -f1); ED=$(echo $DATES | cut -d' ' -f2)
             CAP=$(ask_capital)
+            read -p "Min. Trades pro Config im Lookback-Fenster [Standard: 5]: " MIN_T
+            MIN_T="${MIN_T//[$'\r\n ']/}"
+            if ! [[ "$MIN_T" =~ ^[0-9]+$ ]]; then MIN_T=5; fi
+        else
+            MIN_T=5
         fi
         $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/walk_forward.py" \
-            --start-date "$SD" --end-date "$ED" --capital "$CAP" $NO_TELEGRAM
+            --start-date "$SD" --end-date "$ED" --capital "$CAP" \
+            --min-trades "$MIN_T" $NO_TELEGRAM
         ;;
 
     2)  echo -e "${GREEN}▶ Slippage & Fee Impact${NC}"
