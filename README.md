@@ -306,10 +306,12 @@ Analysiert ausschließlich die in `settings.json` unter `active_strategies` eing
 
 #### 1) Walk-Forward Lookback-Analyse (Dark Period)
 
-**Was es ist:** Der härteste Validierungstest gegen Overfitting. Simuliert den wöchentlichen Auto-Optimizer: Für jeden Lookback (1W, 2W, 4W, 8W, 12W, 26W) wird geprüft, welche Configs in den letzten N Wochen positiven Calmar hatten (In-Sample), und wie diese Configs in der darauffolgenden Woche performen (Out-of-Sample). Alle Lookbacks werden auf demselben OOS-Zeitraum getestet — kein Lookahead.
+**Was es ist:** Findet den optimalen `backtest_lookback_weeks`-Parameter für den wöchentlichen Auto-Optimizer — also: wie viele Wochen soll der Auto-Optimizer zurückschauen wenn er entscheidet, welche Configs aktiv bleiben?
+
+Dazu simuliert die Analyse den Auto-Optimizer rückwirkend auf dem **Dark Period** (Daten nach dem Pipeline-Cutoff, nie vom Optimizer gesehen): Für jeden Lookback (1W, 2W, 4W, 8W, 12W, 26W) wird Woche für Woche simuliert — welche Configs wären in den letzten N Wochen selektiert worden, und wie hätten sie in der darauffolgenden Woche performt? Der Lookback mit dem besten Calmar gewinnt und wird automatisch in `settings.json` geschrieben.
 
 **Dark Period — kein Lookahead:**
-Der Test läuft ausschließlich auf dem **dunklen Bereich** der Pipeline — also Daten nach dem Optimierungs-Cutoff. Dieser wird automatisch aus der Config-Metadata (`_meta.oos_start`) erkannt. Die IS-Daten (vor dem OOS-Datum) dienen nur als Lookback-Quelle für die Config-Selektion.
+Die Analyse läuft ausschließlich auf dem **dunklen Bereich** der Pipeline — Daten nach dem Optimierungs-Cutoff. Wird automatisch aus der Config-Metadata (`_meta.oos_start`) erkannt. Die IS-Daten (vor dem OOS-Datum) dienen nur als Lookback-Quelle für die Config-Selektion.
 
 ```
 Pipeline:    [─── IS (Training) ────────────────────] [── OOS (Dark) ──►]
