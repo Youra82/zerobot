@@ -114,18 +114,16 @@ def create_chart(final_pcts, max_dds, symbol, n_sims, p5, p50, p95):
 OOS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
 
 
-def load_oos_pnl_pcts() -> dict:
-    """Liest OOS-Trade-Returns aus last_oos_run.json. Key = config_file."""
+def load_oos_results() -> list:
+    """Liest alle OOS-Ergebnisse aus last_oos_run.json."""
     if not os.path.exists(OOS_FILE):
-        return {}
+        return []
     try:
         with open(OOS_FILE) as f:
             data = json.load(f)
-        return {r['config_file']: r.get('oos_pnl_pcts', [])
-                for r in data.get('results', [])
-                if r.get('oos_pnl_pcts')}
+        return [r for r in data.get('results', []) if r.get('oos_pnl_pcts')]
     except Exception:
-        return {}
+        return []
 
 
 def main():
@@ -139,16 +137,22 @@ def main():
                         help='Nutze OOS-Trades aus last_oos_run.json statt In-Sample-Backtest')
     args = parser.parse_args()
 
-    configs = load_configs()
-    if not configs:
-        print("Keine Configs gefunden.")
-        return
-
-    oos_pnl_map = load_oos_pnl_pcts() if args.oos_mode else {}
-    if args.oos_mode and not oos_pnl_map:
-        print("  Hinweis: --oos-mode aktiv aber last_oos_run.json leer/nicht vorhanden.")
-        print("  Bitte zuerst run_pipeline.sh mit OOS-Datum ausführen.")
-        return
+    # OOS-Modus: direkt aus last_oos_run.json — kein load_configs() nötig
+    if args.oos_mode:
+        oos_results = load_oos_results()
+        if not oos_results:
+            print("  Hinweis: --oos-mode aktiv aber last_oos_run.json leer/nicht vorhanden.")
+            print("  Bitte zuerst run_pipeline.sh mit OOS-Datum ausführen.")
+            return
+        configs = [(r['config_file'], {'market': {'symbol': r['symbol'], 'timeframe': r['timeframe']}})
+                   for r in oos_results]
+        oos_pnl_map = {r['config_file']: r['oos_pnl_pcts'] for r in oos_results}
+    else:
+        configs = load_configs()
+        if not configs:
+            print("Keine Configs gefunden.")
+            return
+        oos_pnl_map = {}
 
     rng = np.random.default_rng(42)
 
