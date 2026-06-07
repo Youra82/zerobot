@@ -49,29 +49,32 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
     Runs walk-forward OOS test for all (or filtered) configs.
     Returns list of result dicts.
     """
-    # Load saved config list from last optimizer run
-    saved_configs = []
+    # In-Sample PnL aus last_optimizer_run.json (nur für Anzeige)
+    insample_map = {}
     if os.path.exists(RESULTS_FILE):
         try:
             with open(RESULTS_FILE) as f:
                 opt_results = json.load(f)
-            saved_configs = opt_results.get('saved', [])
+            for r in opt_results.get('saved', []):
+                insample_map[r['config_file']] = r.get('pnl_pct', 0)
         except Exception:
             pass
 
-    # Fall back: scan configs dir if no optimizer results available
-    if not saved_configs:
-        if os.path.isdir(CONFIGS_DIR):
-            for fn in sorted(os.listdir(CONFIGS_DIR)):
-                if fn.startswith('config_') and fn.endswith('.json'):
-                    cfg = load_config(fn)
-                    m   = cfg.get('market', {})
-                    saved_configs.append({
-                        'config_file': fn,
-                        'symbol':      m.get('symbol', '?'),
-                        'timeframe':   m.get('timeframe', '?'),
-                        'pnl_pct':     cfg.get('_meta', {}).get('pnl_pct', 0),
-                    })
+    # Immer ALLE Configs aus dem Verzeichnis lesen (nicht nur last run)
+    saved_configs = []
+    if os.path.isdir(CONFIGS_DIR):
+        for fn in sorted(os.listdir(CONFIGS_DIR)):
+            if fn.startswith('config_') and fn.endswith('.json'):
+                cfg = load_config(fn)
+                m   = cfg.get('market', {})
+                # In-Sample PnL: aus last_optimizer_run.json, sonst aus _meta
+                in_pnl = insample_map.get(fn, cfg.get('_meta', {}).get('pnl_pct', 0))
+                saved_configs.append({
+                    'config_file': fn,
+                    'symbol':      m.get('symbol', '?'),
+                    'timeframe':   m.get('timeframe', '?'),
+                    'pnl_pct':     in_pnl,
+                })
 
     if configs_filter:
         saved_configs = [c for c in saved_configs

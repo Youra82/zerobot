@@ -155,6 +155,19 @@ def main():
         print(f"\n===== Optimiere: {symbol} ({timeframe}) [EAR] =====")
 
         HISTORICAL_DATA = load_data(symbol, timeframe, args.start_date, args.end_date)
+        actual_start = args.start_date
+        if HISTORICAL_DATA.empty:
+            # Fallback: symbol möglicherweise erst später gelistet — kürzere Zeiträume versuchen
+            from datetime import datetime as _dt2, timedelta as _td
+            fallback_years = [3, 2, 1]
+            end_dt = _dt2.strptime(args.end_date, '%Y-%m-%d')
+            for years in fallback_years:
+                fb_start = (end_dt - _td(days=years * 365)).strftime('%Y-%m-%d')
+                HISTORICAL_DATA = load_data(symbol, timeframe, fb_start, args.end_date)
+                if not HISTORICAL_DATA.empty:
+                    actual_start = fb_start
+                    print(f"  Hinweis: Keine Daten ab {args.start_date} — verwende {fb_start} ({years} Jahre).")
+                    break
         if HISTORICAL_DATA.empty:
             print("  Keine Daten verfuegbar.")
             run_results['failed'].append({'symbol': symbol, 'timeframe': timeframe, 'reason': 'no_data'})
