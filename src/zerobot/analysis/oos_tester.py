@@ -169,6 +169,18 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
             'oos_pnl_pcts':  pnl_pcts,
         })
 
+        # oos_start / oos_end in Config-_meta zurückschreiben (für walk_forward Auto-Detect)
+        try:
+            cfg_path = os.path.join(CONFIGS_DIR, cfg_file)
+            cfg_full = load_config(cfg_file)
+            cfg_full.setdefault('_meta', {})['oos_start'] = oos_start
+            cfg_full['_meta']['oos_end']   = oos_end
+            cfg_full['_meta']['oos_pnl_pct'] = round(oos_pnl, 2)
+            with open(cfg_path, 'w') as f:
+                json.dump(cfg_full, f, indent=4)
+        except Exception:
+            pass
+
     return results
 
 

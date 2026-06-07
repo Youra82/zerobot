@@ -317,27 +317,73 @@ def create_chart(results, week_starts, capital):
     return path
 
 
+OOS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
+
+
 def detect_dark_period(configs):
     """
-    Liest OOS-Datum aus _meta der Configs (gesetzt von run_pipeline.sh).
-    Gibt (is_start, is_end, oos_start, oos_end) zurück, oder None wenn nicht vorhanden.
-    Bei mehreren Configs: spätestes oos_start (konservativster echter Dark-Period).
+    Erkennt den Dark Period (OOS) aus:
+    1. Config _meta.oos_start  (ab jetzt vom oos_tester geschrieben)
+    2. Fallback: artifacts/results/last_oos_run.json
+    3. Fallback: _meta.train_end + 1 Tag
+    Bei mehreren Configs: spätestes oos_start.
     """
     best = None
+
+    # Quelle 1: Config _meta
     for fn, cfg in configs:
-        meta = cfg.get('_meta', {})
+        meta  = cfg.get('_meta', {})
         oos_s = meta.get('oos_start') or meta.get('oos_date')
         if not oos_s:
             continue
         if best is None or oos_s > best['oos_start']:
             best = {
-                'is_start':  meta.get('is_start', '?'),
-                'is_end':    meta.get('is_end',   '?'),
+                'is_start':  meta.get('train_start', '?'),
+                'is_end':    meta.get('train_end',   '?'),
                 'oos_start': oos_s,
-                'oos_end':   meta.get('oos_end',  datetime.now().strftime('%Y-%m-%d')),
+                'oos_end':   meta.get('oos_end', datetime.now().strftime('%Y-%m-%d')),
                 'symbol':    cfg.get('market', {}).get('symbol', fn),
+                'source':    'Config _meta',
             }
-    return best
+
+    if best:
+        return best
+
+    # Quelle 2: last_oos_run.json
+    try:
+        with open(OOS_FILE) as f:
+            oos_data = json.load(f)
+        oos_s = oos_data.get('oos_start')
+        if oos_s:
+            return {
+                'is_start':  oos_data.get('warmup_start', '?'),
+                'is_end':    '(aus last_oos_run.json)',
+                'oos_start': oos_s,
+                'oos_end':   oos_data.get('oos_end', datetime.now().strftime('%Y-%m-%d')),
+                'symbol':    'alle Configs',
+                'source':    'last_oos_run.json',
+            }
+    except Exception:
+        pass
+
+    # Quelle 3: train_end aus Config _meta → nächster Tag = OOS-Start
+    for fn, cfg in configs:
+        train_end = cfg.get('_meta', {}).get('train_end')
+        if train_end:
+            try:
+                oos_s = (pd.to_datetime(train_end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                return {
+                    'is_start':  cfg.get('_meta', {}).get('train_start', '?'),
+                    'is_end':    train_end,
+                    'oos_start': oos_s,
+                    'oos_end':   datetime.now().strftime('%Y-%m-%d'),
+                    'symbol':    cfg.get('market', {}).get('symbol', fn),
+                    'source':    '_meta.train_end + 1 Tag',
+                }
+            except Exception:
+                pass
+
+    return None
 
 
 def main():
@@ -383,7 +429,8 @@ def main():
     print(f"  Frage: Wie viele Wochen Lookback für den Auto-Optimizer?")
     print()
     if dark and not args.start_date:
-        print(f"  {G}▶ Dark Period (Pipeline OOS) — auto-erkannt:{NC}")
+        src = dark.get('source', '')
+        print(f"  {G}▶ Dark Period (Pipeline OOS) — auto-erkannt [{src}]:{NC}")
         print(f"  ┌─────────────────────────────────────────────────────────┐")
         print(f"  │  IS  (Training):  {dark['is_start']}  →  {dark['is_end']}")
         print(f"  │  OOS (Dark):      {dark['oos_start']}  →  {oos_end_str}  ◄ Walk-Forward")
