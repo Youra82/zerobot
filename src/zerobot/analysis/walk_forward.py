@@ -393,15 +393,27 @@ def main():
               f"Calmar={calmar:.1f} | Trades={n_trades} | "
               f"WR={wr:.1f}% | Leerwochen={empty_w}{note}")
 
-    # ── Bester Lookback
-    best_weeks = max(results,
-                     key=lambda w: compute_stats(results[w][0], args.capital)[0])
-    bc, bp, bd = compute_stats(results[best_weeks][0], args.capital)
+    # ── Bester Lookback (nur Lookbacks mit echten Trades berücksichtigen)
+    tradeable = {w: v for w, v in results.items() if v[2] > 0}
+    if tradeable:
+        best_weeks = max(tradeable,
+                         key=lambda w: compute_stats(results[w][0], args.capital)[0])
+    else:
+        best_weeks = None
+    bc, bp, bd = compute_stats(results[best_weeks][0], args.capital) if best_weeks else (0, 0, 0)
 
     print()
     print(f"  {'─' * 55}")
-    print(f"  {G}★ Bester Lookback: {best_weeks} Wochen{NC}")
-    print(f"  Calmar: {bc:.1f}  |  PnL: {bp:+.1f}%  |  MaxDD: {bd:.1f}%")
+    if best_weeks and bp > 0:
+        print(f"  {G}★ Bester Lookback: {best_weeks} Wochen{NC}")
+        print(f"  Calmar: {bc:.1f}  |  PnL: {bp:+.1f}%  |  MaxDD: {bd:.1f}%")
+    elif best_weeks:
+        print(f"  {Y}⚠ Alle Lookbacks negativ. Bestes Ergebnis: {best_weeks}W{NC}")
+        print(f"  Calmar: {bc:.1f}  |  PnL: {bp:+.1f}%  |  MaxDD: {bd:.1f}%")
+        print(f"  {Y}→ Config zeigt Out-of-Sample Overfitting. Pipeline neu ausführen?{NC}")
+    else:
+        print(f"  {R}✗ Kein Lookback mit Trades gefunden. Min-Trades zu hoch?{NC}")
+        best_weeks = LOOKBACK_WINDOWS[0]
     print(f"  {'─' * 55}")
 
     # ── Tabelle
@@ -413,7 +425,7 @@ def main():
         curve, empty_w, n_trades, n_wins = results[weeks]
         calmar, pnl_pct, max_dd = compute_stats(curve, args.capital)
         wr     = n_wins / n_trades * 100 if n_trades > 0 else 0.0
-        marker = '★' if weeks == best_weeks else ' '
+        marker = '★' if best_weeks and weeks == best_weeks else ' '
         col    = G if pnl_pct > 0 else R
         note   = '  ← zu wenig Daten' if empty_w > n_weeks * 0.5 else ''
         print(f"  {marker}{weeks:2d}W       "
@@ -425,23 +437,26 @@ def main():
               f"{empty_w:>7}{note}")
     print(f"  {'─' * 60}")
 
-    # ── Empfehlung in settings.json schreiben
-    rec_date = (pd.Timestamp.now(tz='UTC') - timedelta(weeks=best_weeks)).strftime('%Y-%m-%d')
+    # ── Empfehlung in settings.json schreiben (nur wenn OOS positiv)
     print()
-    print(f"  {Y}Empfehlung für settings.json:{NC}")
-    print(f'  "backtest_lookback_weeks": {best_weeks}')
-    print(f'  (= {best_weeks} Wochen rollierender Lookback, Start: {rec_date})')
-
-    try:
-        with open(SETTINGS_PATH) as f:
-            settings = json.load(f)
-        opt = settings.setdefault('optimization_settings', {})
-        opt['backtest_lookback_weeks'] = best_weeks
-        with open(SETTINGS_PATH, 'w') as f:
-            json.dump(settings, f, indent=4)
-        print(f"  {G}✓ settings.json aktualisiert (backtest_lookback_weeks={best_weeks}){NC}")
-    except Exception as e:
-        print(f"  {Y}settings.json konnte nicht aktualisiert werden: {e}{NC}")
+    if bp > 0:
+        rec_date = (pd.Timestamp.now(tz='UTC') - timedelta(weeks=best_weeks)).strftime('%Y-%m-%d')
+        print(f"  {Y}Empfehlung für settings.json:{NC}")
+        print(f'  "backtest_lookback_weeks": {best_weeks}')
+        print(f'  (= {best_weeks} Wochen rollierender Lookback, Start: {rec_date})')
+        try:
+            with open(SETTINGS_PATH) as f:
+                settings = json.load(f)
+            opt = settings.setdefault('optimization_settings', {})
+            opt['backtest_lookback_weeks'] = best_weeks
+            with open(SETTINGS_PATH, 'w') as f:
+                json.dump(settings, f, indent=4)
+            print(f"  {G}✓ settings.json aktualisiert (backtest_lookback_weeks={best_weeks}){NC}")
+        except Exception as e:
+            print(f"  {Y}settings.json konnte nicht aktualisiert werden: {e}{NC}")
+    else:
+        print(f"  {Y}settings.json NICHT aktualisiert — OOS-Performance negativ.{NC}")
+        print(f"  {Y}Empfehlung: run_pipeline.sh neu ausführen (größerer Zeitraum / andere Config).{NC}")
 
     # ── Chart
     print()
@@ -467,8 +482,11 @@ def main():
                     f"DD {max_dd:.1f}% | Calmar {calmar:.1f} | "
                     f"Leerwochen={empty_w}")
             caption_lines.append("")
-            caption_lines.append(
-                f"★ Bester Lookback: {best_weeks} Wochen (Calmar {bc:.1f})")
+            if best_weeks and bp > 0:
+                caption_lines.append(f"★ Bester Lookback: {best_weeks} Wochen (Calmar {bc:.1f})")
+            elif best_weeks:
+                caption_lines.append(f"⚠ Alle Lookbacks negativ. Bestes: {best_weeks}W (Calmar {bc:.1f})")
+                caption_lines.append("→ Config zeigt OOS-Overfitting. Pipeline neu?")
             send_telegram_photo(token, chat_id, chart_path,
                                 "\n".join(caption_lines))
             print(f"  {G}✓ Telegram gesendet.{NC}")
