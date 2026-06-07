@@ -126,14 +126,15 @@ fi
 # ── Lookback-Empfehlung ───────────────────────────────────────────────────────
 echo ""
 echo "--- Empfehlung: Optimaler Rückblick-Zeitraum ---"
-printf "+-------------+--------------------------------+\n"
-printf "| %-11s | %-30s |\n" "Zeitfenster" "Empfohlener Rückblick (Tage)"
-printf "+-------------+--------------------------------+\n"
-printf "| %-11s | %-30s |\n" "15m, 30m"  "90 - 180 Tage"
-printf "| %-11s | %-30s |\n" "1h"        "365 - 548 Tage"
-printf "| %-11s | %-30s |\n" "4h"        "730 - 1095 Tage"
-printf "| %-11s | %-30s |\n" "1d"        "1460 - 1825 Tage"
-printf "+-------------+--------------------------------+\n"
+printf "+------------------+-----------------------------+\n"
+printf "| %-16s | %-27s |\n" "Zeitfenster" "Empfohlener Rückblick (Tage)"
+printf "+------------------+-----------------------------+\n"
+printf "| %-16s | %-27s |\n" "15m, 30m"    "180 Tage   (~6 Monate)"
+printf "| %-16s | %-27s |\n" "1h"          "548 Tage   (~1,5 Jahre)"
+printf "| %-16s | %-27s |\n" "2h"          "730 Tage   (~2 Jahre)"
+printf "| %-16s | %-27s |\n" "4h, 6h"      "1095 Tage  (~3 Jahre)"
+printf "| %-16s | %-27s |\n" "1d"          "1825 Tage  (~5 Jahre)"
+printf "+------------------+-----------------------------+\n"
 if [[ -n "$OOS_DATE" ]]; then
     echo -e "  ${CYAN}Rückblick wird rückwärts ab OOS-Datum ($OOS_DATE) berechnet${NC}"
 fi
@@ -144,7 +145,6 @@ START_INPUT="${START_INPUT//[$'\r\n ']/}"
 
 # Enddatum für Optimizer = OOS-Datum - 1 Tag (oder heute wenn kein OOS)
 END_INPUT="$OPTIM_END"
-echo -e "${CYAN}INFO: Optimizer-Enddatum: $END_INPUT${NC}"
 
 # Automatisches Startdatum — rückwärts ab OPTIM_END (nicht ab heute)
 export ZB_OPTIM_END="$OPTIM_END"
@@ -168,11 +168,17 @@ except Exception:
 print((ref_dt - timedelta(days=days)).strftime('%Y-%m-%d'))
 PYEOF2
     )
-    while IFS=' ' read -r sym tf; do
-        echo -e "${CYAN}INFO: Automatisches Startdatum fuer $tf: $START_INPUT${NC}"
-        break
-    done <<< "$PAIRS"
 fi
+
+# ── Perioden-Zusammenfassung anzeigen ─────────────────────────────────────────
+echo ""
+if [[ -n "$OOS_DATE" ]]; then
+    echo -e "  ${BOLD}Trainingsperiode:  ${GREEN}$START_INPUT  →  $END_INPUT${NC}"
+    echo -e "  ${BOLD}Backtestperiode:   ${YELLOW}ab $OOS_DATE  →  $OOS_TEST_END  (dunkler Bereich)${NC}"
+else
+    echo -e "  ${BOLD}Backtestperiode:   ${GREEN}$START_INPUT  →  $END_INPUT${NC}"
+fi
+echo ""
 
 # ── Optimierungs-Parameter ────────────────────────────────────────────────────
 echo ""
