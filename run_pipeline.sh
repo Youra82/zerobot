@@ -238,10 +238,9 @@ read -p "Max Drawdown % [Standard: 30]: " DD_INPUT
 DD_INPUT="${DD_INPUT//[$'\r\n ']/}"
 if ! [[ "$DD_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then DD_INPUT=30; fi
 
-echo "  (EAR erreicht typisch 20-35% WR — Werte über 35% führen meist zu 0 Ergebnissen)"
-read -p "Min. Win-Rate % [Standard: 25]: " WR_INPUT
+read -p "Min. Win-Rate % [Standard: 45]: " WR_INPUT
 WR_INPUT="${WR_INPUT//[$'\r\n ']/}"
-if ! [[ "$WR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WR_INPUT=25; fi
+if ! [[ "$WR_INPUT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WR_INPUT=45; fi
 
 # ── EAR Strategie-Parameter (optional fixieren) ───────────────────────────────
 echo ""
