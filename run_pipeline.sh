@@ -114,9 +114,41 @@ print((d - timedelta(days=1)).strftime('%Y-%m-%d'))
         OPTIM_END=$(date +%Y-%m-%d)
     else
         OOS_TEST_END=$(date +%Y-%m-%d)
+
+        # Vorschau-Startdatum berechnen (aus PAIRS + lookback_map)
+        read PREVIEW_START PREVIEW_DAYS OOS_DAYS <<< $($PYTHON - <<PYEOF
+from datetime import datetime, timedelta
+pairs = """$PAIRS"""
+lookback_map = {'15m':180,'30m':180,'1h':548,'2h':730,'4h':1095,'6h':1095,'1d':1825}
+tfs = set()
+for line in pairs.strip().split('\n'):
+    parts = line.strip().split()
+    if len(parts) == 2:
+        tfs.add(parts[1])
+days  = max((lookback_map.get(tf, 548) for tf in tfs), default=548)
+ref   = datetime.strptime('$OPTIM_END', '%Y-%m-%d')
+start = (ref - timedelta(days=days)).strftime('%Y-%m-%d')
+d1    = datetime.strptime('$OOS_DATE',    '%Y-%m-%d')
+d2    = datetime.strptime('$OOS_TEST_END','%Y-%m-%d')
+print(start, days, (d2-d1).days)
+PYEOF
+        )
+
+        echo ""
         echo -e "${GREEN}✔ OOS-Modus aktiv:${NC}"
-        echo -e "  Optimizer trainiert: [START] → ${YELLOW}$OPTIM_END${NC}"
-        echo -e "  OOS-Test läuft auf:  ${YELLOW}$OOS_DATE${NC} → $OOS_TEST_END (DUNKLER BEREICH)"
+        echo ""
+        echo -e "  Trainingsperiode:  ${YELLOW}$PREVIEW_START${NC}  ──────────────────────►  ${YELLOW}$OPTIM_END${NC}"
+        echo -e "  Backtestperiode:   ${CYAN}$OOS_DATE${NC}  ──────────────────────►  ${CYAN}$OOS_TEST_END${NC}  ☁ dunkler Bereich"
+        echo ""
+        printf "  %s\n" "────────────────────────────────────────────────────────────────────"
+        printf "  %s%s%s  %s%s%s\n" \
+            "$YELLOW" "◄── TRAINING ($PREVIEW_DAYS Tage) ──►" "$NC" \
+            "$CYAN"   "◄── BACKTEST ($OOS_DAYS Tage) ──►"    "$NC"
+        printf "  %-10s%*s%-10s  %-10s%*s%-10s\n" \
+            "$PREVIEW_START" 12 "" "$OPTIM_END" "$OOS_DATE" 4 "" "$OOS_TEST_END"
+        printf "  %s\n" "────────────────────────────────────────────────────────────────────"
+        echo ""
+        echo -e "  ${CYAN}(Startdatum kann unten angepasst werden — 'a' = Automatik = $PREVIEW_START)${NC}"
     fi
 else
     OPTIM_END=$(date +%Y-%m-%d)
