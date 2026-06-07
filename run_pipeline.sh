@@ -86,6 +86,43 @@ for sym in coins:
 PYEOF
 )
 
+# ── Walk-Forward OOS-Test (optional) ─────────────────────────────────────────
+echo ""
+echo "======================================================="
+echo "  Walk-Forward Out-of-Sample Test (optional)"
+echo "======================================================="
+echo ""
+echo "  Konzept:"
+echo "    1. Du wählst ein OOS-Datum (z.B. 2026-04-01)"
+echo "    2. Optimizer trainiert NUR auf Daten VOR diesem Datum"
+echo "    3. Danach testet der Backtester die Config auf Daten"
+echo "       AB diesem Datum — exakt wie der Live-Bot (kein Lookahead)"
+echo "    4. So erkennst du Overfitting sofort"
+echo ""
+read -p "OOS-Startdatum eingeben [leer=kein OOS-Test, Standard-Modus]: " OOS_DATE
+OOS_DATE="${OOS_DATE//[$'\r\n ']/}"
+
+if [[ -n "$OOS_DATE" ]]; then
+    OPTIM_END=$($PYTHON -c "
+from datetime import datetime, timedelta
+d = datetime.strptime('$OOS_DATE', '%Y-%m-%d')
+print((d - timedelta(days=1)).strftime('%Y-%m-%d'))
+" 2>/dev/null)
+    if [[ -z "$OPTIM_END" ]]; then
+        echo -e "${RED}Ungültiges Datum '$OOS_DATE' — Standard-Modus.${NC}"
+        OOS_DATE=""
+        OPTIM_END=$(date +%Y-%m-%d)
+    else
+        OOS_TEST_END=$(date +%Y-%m-%d)
+        echo -e "${GREEN}✔ OOS-Modus aktiv:${NC}"
+        echo -e "  Optimizer trainiert: [START] → ${YELLOW}$OPTIM_END${NC}"
+        echo -e "  OOS-Test läuft auf:  ${YELLOW}$OOS_DATE${NC} → $OOS_TEST_END (DUNKLER BEREICH)"
+    fi
+else
+    OPTIM_END=$(date +%Y-%m-%d)
+    echo -e "${CYAN}ℹ  Standard-Modus — kein OOS-Test.${NC}"
+fi
+
 # ── Lookback-Empfehlung ───────────────────────────────────────────────────────
 echo ""
 echo "--- Empfehlung: Optimaler Rückblick-Zeitraum ---"
@@ -97,16 +134,23 @@ printf "| %-11s | %-30s |\n" "1h"        "365 - 548 Tage"
 printf "| %-11s | %-30s |\n" "4h"        "730 - 1095 Tage"
 printf "| %-11s | %-30s |\n" "1d"        "1460 - 1825 Tage"
 printf "+-------------+--------------------------------+\n"
+if [[ -n "$OOS_DATE" ]]; then
+    echo -e "  ${CYAN}Rückblick wird rückwärts ab OOS-Datum ($OOS_DATE) berechnet${NC}"
+fi
 echo ""
 
 read -p "Startdatum (JJJJ-MM-TT) oder 'a' für Automatik [Standard: a]: " START_INPUT
 START_INPUT="${START_INPUT//[$'\r\n ']/}"
-read -p "Enddatum (JJJJ-MM-TT) [Standard: Heute]: " END_INPUT
-END_INPUT="${END_INPUT//[$'\r\n ']/}"
-END_INPUT="${END_INPUT:-$(date +%Y-%m-%d)}"
 
+# Enddatum für Optimizer = OOS-Datum - 1 Tag (oder heute wenn kein OOS)
+END_INPUT="$OPTIM_END"
+echo -e "${CYAN}INFO: Optimizer-Enddatum: $END_INPUT${NC}"
+
+# Automatisches Startdatum — rückwärts ab OPTIM_END (nicht ab heute)
+export ZB_OPTIM_END="$OPTIM_END"
 if [[ -z "$START_INPUT" || "$START_INPUT" == "a" ]]; then
     START_INPUT=$($PYTHON - <<PYEOF2
+import os
 from datetime import datetime, timedelta
 pairs = """$PAIRS"""
 lookback_map = {'15m':180,'30m':180,'1h':548,'2h':730,'4h':1095,'6h':1095,'1d':1825}
@@ -116,11 +160,16 @@ for line in pairs.strip().split('\n'):
     if len(parts) == 2:
         tfs.add(parts[1])
 days = max((lookback_map.get(tf, 548) for tf in tfs), default=548)
-print((datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d'))
+ref = os.environ.get('ZB_OPTIM_END', '')
+try:
+    ref_dt = datetime.strptime(ref, '%Y-%m-%d')
+except Exception:
+    ref_dt = datetime.now()
+print((ref_dt - timedelta(days=days)).strftime('%Y-%m-%d'))
 PYEOF2
     )
     while IFS=' ' read -r sym tf; do
-        echo -e "${CYAN}INFO: Automatisches Startdatum fuer $tf gesetzt auf: $START_INPUT${NC}"
+        echo -e "${CYAN}INFO: Automatisches Startdatum fuer $tf: $START_INPUT${NC}"
         break
     done <<< "$PAIRS"
 fi
@@ -198,7 +247,12 @@ while IFS=' ' read -r sym tf; do
     echo ""
     echo "======================================================="
     echo "  Bearbeite Pipeline für: $COIN ($tf)"
-    echo "  Datenzeitraum: $START_INPUT bis $END_INPUT"
+    if [[ -n "$OOS_DATE" ]]; then
+        echo "  Trainingszeitraum: $START_INPUT bis $END_INPUT"
+        echo "  OOS-Periode:       $OOS_DATE bis $OOS_TEST_END"
+    else
+        echo "  Datenzeitraum: $START_INPUT bis $END_INPUT"
+    fi
     echo "======================================================="
     echo ""
 
@@ -223,10 +277,30 @@ while IFS=' ' read -r sym tf; do
 
 done <<< "$PAIRS"
 
+# ── Walk-Forward OOS-Test (wenn OOS-Datum gesetzt) ────────────────────────────
+if [[ -n "$OOS_DATE" ]]; then
+    echo ""
+    echo "======================================================="
+    echo -e "  ${CYAN}Walk-Forward OOS-Test: $OOS_DATE → $OOS_TEST_END${NC}"
+    echo "  (Live-Bot-Simulation auf dem dunklen Bereich)"
+    echo "======================================================="
+    echo ""
+
+    OOS_TESTER="$SCRIPT_DIR/src/zerobot/analysis/oos_tester.py"
+    $PYTHON "$OOS_TESTER" \
+        --oos_start    "$OOS_DATE" \
+        --oos_end      "$OOS_TEST_END" \
+        --warmup_start "$START_INPUT" \
+        --start_capital "$CAPITAL_INPUT"
+fi
+
 echo ""
 echo "======================================================="
 echo -e "  ${GREEN}Pipeline abgeschlossen!${NC}"
 echo ""
+if [[ -n "$OOS_DATE" ]]; then
+    echo "  OOS-Ergebnisse:      artifacts/results/last_oos_run.json"
+fi
 echo "  Nächste Schritte:"
 echo "    1. Ergebnisse prüfen:    ./show_results.sh"
 echo "    2. settings.json:        \"active\": true setzen"

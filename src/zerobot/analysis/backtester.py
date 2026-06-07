@@ -126,7 +126,8 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 
 
 def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
-                 fee_pct_override=None, return_trades=False):
+                 fee_pct_override=None, return_trades=False,
+                 trade_start_date=None):
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
@@ -152,6 +153,15 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
         cidx = brick['candle_idx']
         bricks_by_candle[cidx].append(brick)
         last_brick_idx_at_candle[cidx] = bidx
+
+    # Walk-Forward: Index ab dem getraded wird (davor = Warmup für Bricks/State)
+    trade_start_idx = 0
+    if trade_start_date is not None:
+        ts_dt = pd.to_datetime(trade_start_date, utc=True)
+        for idx, ts in enumerate(processed_data.index):
+            if ts >= ts_dt:
+                trade_start_idx = idx
+                break
 
     current_capital  = start_capital
     peak_capital     = start_capital
@@ -233,6 +243,10 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     drawdown         = (peak_capital - current_capital) / peak_capital
                     max_drawdown_pct = max(max_drawdown_pct, drawdown)
                 continue
+
+        # ── Warmup: vor trade_start_date keine neuen Positionen ──────────────
+        if i < trade_start_idx:
+            continue
 
         # ── Einstiegs-Logik ───────────────────────────────────────────────────
         if not position and current_capital > 0:
