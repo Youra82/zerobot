@@ -25,6 +25,7 @@ from zerobot.analysis.backtester import load_data, run_backtest, load_all_config
 load_configs = load_all_configs
 
 LOOKBACK_WINDOWS = [1, 2, 4, 8, 12, 26]  # Wochen
+WARMUP_WEEKS    = 16  # Indikator-Warmup: 16×7=112 Daily-Kerzen > 100-Kerzen-Threshold
 COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2']
 
 G  = '\033[0;32m'
@@ -112,11 +113,11 @@ def slice_data(cache, symbol, tf, start_dt, end_dt):
 
 
 def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
-                     min_candles=20, min_trades=2):
+                     min_candles=5, min_trades=2):
     """
-    In-Sample Portfolio-Selektion: wählt beste Config pro Symbol
-    anhand Calmar über das Lookback-Fenster.
-    min_trades: Mindest-Trades im IS-Fenster (sonst: zu wenig Evidenz).
+    In-Sample Portfolio-Selektion: wählt beste Config pro Symbol anhand Calmar.
+    Backtest läuft mit WARMUP_WEEKS Vorlauf (>100 Kerzen auch für Daily-TF),
+    Trades werden aber nur ab is_start gezählt (trade_start_date).
     """
     symbol_best = {}
     for fn, cfg in configs:
@@ -125,12 +126,17 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
         strategy = cfg.get('strategy', {})
         risk     = cfg.get('risk', {})
 
-        is_data = slice_data(cache, sym, tf, is_start, is_end)
-        if len(is_data) < min_candles:
+        # Prüfe ob tatsächliches IS-Fenster genug Kerzen hat
+        is_data_check = slice_data(cache, sym, tf, is_start, is_end)
+        if len(is_data_check) < min_candles:
             continue
 
+        # Backtest mit Warmup-Vorlauf (>100 Kerzen für Indikator-Init)
+        is_data = slice_data(cache, sym, tf,
+                             is_start - timedelta(weeks=WARMUP_WEEKS), is_end)
         try:
-            res = run_backtest(is_data, strategy, risk, 100.0, verbose=False)
+            res = run_backtest(is_data, strategy, risk, 100.0, verbose=False,
+                               trade_start_date=is_start.isoformat())
         except Exception:
             continue
 
@@ -181,14 +187,17 @@ def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
         wk_wins   = 0
 
         for item in portfolio:
-            oos_data = slice_data(cache, item['sym'], item['tf'], week_start, oos_end)
+            # OOS mit Warmup-Vorlauf (>100 Kerzen), Trades nur ab week_start
+            oos_data = slice_data(cache, item['sym'], item['tf'],
+                                  week_start - timedelta(weeks=WARMUP_WEEKS), oos_end)
             if len(oos_data) < 2:
                 continue
             strategy = item['cfg'].get('strategy', {})
             risk     = item['cfg'].get('risk', {})
             try:
                 res = run_backtest(oos_data, strategy, risk, cap_each,
-                                   verbose=False, return_trades=True)
+                                   verbose=False, return_trades=True,
+                                   trade_start_date=week_start.isoformat())
             except Exception:
                 continue
             oos_pnl  += res.get('end_capital', cap_each) - cap_each
@@ -335,10 +344,10 @@ def main():
     print(f"  Lookbacks:  {LOOKBACK_WINDOWS} Wochen")
     print()
 
-    # ── Daten laden (einmalig, für die volle Periode + max. Lookback)
+    # ── Daten laden (einmalig, für die volle Periode + max. Lookback + Warmup)
     max_lookback = max(LOOKBACK_WINDOWS)
     full_start_dt = (pd.to_datetime(args.start_date, utc=True)
-                     - timedelta(weeks=max_lookback))
+                     - timedelta(weeks=max_lookback + WARMUP_WEEKS))
     full_end_str  = args.end_date
     full_start_str = full_start_dt.strftime('%Y-%m-%d')
 
