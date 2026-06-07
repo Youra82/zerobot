@@ -245,8 +245,10 @@ def main():
             "risk":     risk_config,
             "behavior": behavior_config,
             "_meta": {
-                "pnl_pct":      round(new_pnl, 2),
-                "optimized_at": _dt.now().isoformat(timespec='seconds'),
+                "pnl_pct":        round(new_pnl, 2),
+                "optimized_at":   _dt.now().isoformat(timespec='seconds'),
+                "train_start":    actual_start,
+                "train_end":      args.end_date,
             },
         }
         with open(config_output_path, 'w') as f:
