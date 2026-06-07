@@ -9,15 +9,17 @@ from zerobot.analysis.backtester import load_data, run_backtest, load_active_con
 
 load_configs = load_active_configs
 
-def simulate_bootstrap(pnl_list, start_capital, rng):
-    # Resample WITH replacement — gives true distribution (not always same sum)
-    n    = len(pnl_list)
-    perm = rng.choice(pnl_list, size=n, replace=True)
+def simulate_bootstrap(pnl_pct_list, start_capital, rng):
+    # Resample WITH replacement using percentage returns (not absolute USDT)
+    # so large late-game trades don't destroy early-stage capital when shuffled
+    n    = len(pnl_pct_list)
+    perm = rng.choice(pnl_pct_list, size=n, replace=True)
     capital = start_capital
     peak    = start_capital
     max_dd  = 0.0
-    for pnl in perm:
-        capital += pnl
+    for r in perm:
+        capital *= (1.0 + r)
+        capital  = max(capital, 0.0)  # floor at zero
         if capital > peak:
             peak = capital
         if peak > 0:
@@ -154,12 +156,23 @@ def main():
             print(f"\n  {fn}: Zu wenige Trades ({len(trades)}) fuer Monte Carlo (min. 10).")
             continue
 
-        pnl_list = [t['pnl_usd'] for t in trades]
+        # Prozentuale Returns: pnl_usd / capital_before_trade
+        # capital_before = capital_after - pnl_usd
+        pnl_pct_list = []
+        for t in trades:
+            cap_after = t.get('capital_after', args.capital)
+            pnl_usd   = t.get('pnl_usd', 0.0)
+            cap_before = cap_after - pnl_usd
+            if cap_before > 0:
+                pnl_pct_list.append(pnl_usd / cap_before)
+        if len(pnl_pct_list) < 10:
+            print(f"\n  {fn}: Zu wenige valide Trades fuer Monte Carlo.")
+            continue
 
         final_pcts = []
         max_dds    = []
         for _ in range(args.simulations):
-            fp, md = simulate_bootstrap(pnl_list, args.capital, rng)
+            fp, md = simulate_bootstrap(pnl_pct_list, args.capital, rng)
             final_pcts.append(fp)
             max_dds.append(md * 100)
 
