@@ -3,6 +3,7 @@
 import os
 import sys
 import json
+import math
 import optuna
 import numpy as np
 import argparse
@@ -78,7 +79,11 @@ def objective(trial):
     elif OPTIM_MODE == "best_profit" and (drawdown > MAX_DRAWDOWN_CONSTRAINT or trades < 15):
         raise optuna.exceptions.TrialPruned()
 
-    return pnl
+    # dnabot-Prinzip: score = pnl × log(1 + n_trades)
+    # Verhindert dass der Optimizer Configs findet die mit wenigen perfekten
+    # Trades extreme PnL erreichen (statistische Artefakte / Overfitting).
+    # Mehr Trades = mehr statistische Evidenz = höherer Score.
+    return pnl * math.log(1.0 + trades)
 
 
 def main():
@@ -176,7 +181,9 @@ def main():
         DB_FILE      = os.path.join(PROJECT_ROOT, 'artifacts', 'db', 'optuna_studies_zerobot.db')
         os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         STORAGE_URL  = f"sqlite:///{DB_FILE}?timeout=60"
-        study_name   = f"ear_{create_safe_filename(symbol, timeframe)}_{OPTIM_MODE}"
+        # Trainingsperiode im Studynamen → neue Periode = frische Study, kein Trial-Akkumulation
+        period_tag   = f"{args.start_date[:7]}_{args.end_date[:7]}".replace('-', '')
+        study_name   = f"ear_{create_safe_filename(symbol, timeframe)}_{OPTIM_MODE}_{period_tag}"
 
         study = optuna.create_study(
             storage=STORAGE_URL, study_name=study_name,
