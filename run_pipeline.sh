@@ -138,15 +138,12 @@ PYEOF
         echo -e "${GREEN}✔ OOS-Modus aktiv:${NC}"
         echo ""
         echo -e "  Trainingsperiode:  ${YELLOW}$PREVIEW_START${NC}  ──────────────────────►  ${YELLOW}$OPTIM_END${NC}"
-        echo -e "  Backtestperiode:   ${CYAN}$OOS_DATE${NC}  ──────────────────────►  ${CYAN}$OOS_TEST_END${NC}  ☁ dunkler Bereich"
+        echo -e "  Backtestperiode:   ${CYAN}$OOS_DATE${NC}  ──────────────────────►  ${CYAN}$OOS_TEST_END${NC}  (dunkler Bereich)"
         echo ""
-        printf "  %s\n" "────────────────────────────────────────────────────────────────────"
-        printf "  %s%s%s  %s%s%s\n" \
-            "$YELLOW" "◄── TRAINING ($PREVIEW_DAYS Tage) ──►" "$NC" \
-            "$CYAN"   "◄── BACKTEST ($OOS_DAYS Tage) ──►"    "$NC"
-        printf "  %-10s%*s%-10s  %-10s%*s%-10s\n" \
-            "$PREVIEW_START" 12 "" "$OPTIM_END" "$OOS_DATE" 4 "" "$OOS_TEST_END"
-        printf "  %s\n" "────────────────────────────────────────────────────────────────────"
+        echo    "  ────────────────────────────────────────────────────────────────────"
+        echo -e "  ${YELLOW}◄──── TRAINING ($PREVIEW_DAYS Tage) ────►${NC}  ${CYAN}◄── BACKTEST ($OOS_DAYS Tage) ──►${NC}"
+        echo    "  $PREVIEW_START              $OPTIM_END  $OOS_DATE        $OOS_TEST_END"
+        echo    "  ────────────────────────────────────────────────────────────────────"
         echo ""
         echo -e "  ${CYAN}(Startdatum kann unten angepasst werden — 'a' = Automatik = $PREVIEW_START)${NC}"
     fi
