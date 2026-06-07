@@ -144,7 +144,9 @@ def _ts_to_brick(brick_df, ts_str: str) -> int:
 def _generate_chart(symbol: str, timeframe: str,
                     start_date: str, end_date: str,
                     start_capital: float,
-                    strategy_params: dict, risk_params: dict) -> str:
+                    strategy_params: dict, risk_params: dict,
+                    trade_start_date: str = None,
+                    warmup_start: str = None) -> str:
     """Generiert HTML-EAR-Chart. Gibt Pfad zur HTML-Datei zurueck."""
     try:
         import plotly.graph_objects as go
@@ -157,44 +159,60 @@ def _generate_chart(symbol: str, timeframe: str,
 
     from zerobot.analysis.backtester import load_data, run_backtest
 
-    print(f'INFO: Lade OHLCV-Daten fuer {symbol} {timeframe}...')
-    df = load_data(symbol, timeframe, start_date, end_date)
-    if df is None or df.empty:
-        print(f'INFO: {RED}Keine Daten fuer {symbol} ({timeframe}).{NC}')
-        return ''
+    # OOS-Modus: lade Warmup-Daten fuer korrekten Brick-State
+    if warmup_start:
+        print(f'INFO: OOS-Modus — lade Daten ab Warmup {warmup_start} (Brick-State-Aufbau)...')
+        df_full = load_data(symbol, timeframe, warmup_start, end_date)
+        if df_full is None or df_full.empty:
+            print(f'INFO: {RED}Keine Daten fuer {symbol} ({timeframe}).{NC}')
+            return ''
+        atr_ind_full = ta.volatility.AverageTrueRange(
+            high=df_full['high'], low=df_full['low'], close=df_full['close'], window=14)
+        df_full['atr'] = atr_ind_full.average_true_range()
+        df_full.dropna(subset=['atr'], inplace=True)
+        # Backtest auf vollen Daten, Trades erst ab trade_start_date/start_date
+        bt_trade_start = trade_start_date or start_date
+        print('INFO: Fuehre OOS-Backtest durch (Warmup kausal, Trades ab ' + bt_trade_start + ')...')
+        res = run_backtest(df_full.copy(), strategy_params, risk_params,
+                           start_capital=start_capital, return_trades=True,
+                           trade_start_date=bt_trade_start)
+        # Visueller Datensatz: nur OOS-Periode (bricks werden auf gefilterten Daten neu gebaut)
+        ts_start = pd.to_datetime(start_date, utc=True)
+        df = df_full[df_full.index >= ts_start].copy()
+    else:
+        print(f'INFO: Lade OHLCV-Daten fuer {symbol} {timeframe}...')
+        df = load_data(symbol, timeframe, start_date, end_date)
+        if df is None or df.empty:
+            print(f'INFO: {RED}Keine Daten fuer {symbol} ({timeframe}).{NC}')
+            return ''
+        atr_ind = ta.volatility.AverageTrueRange(
+            high=df['high'], low=df['low'], close=df['close'], window=14)
+        df['atr'] = atr_ind.average_true_range()
+        df.dropna(subset=['atr'], inplace=True)
+        print('INFO: Fuehre Backtest durch...')
+        res = run_backtest(df.copy(), strategy_params, risk_params,
+                           start_capital=start_capital, return_trades=True,
+                           trade_start_date=trade_start_date)
 
-    # ATR berechnen
-    atr_ind = ta.volatility.AverageTrueRange(
-        high=df['high'], low=df['low'], close=df['close'], window=14)
-    df['atr'] = atr_ind.average_true_range()
-    df.dropna(subset=['atr'], inplace=True)
+    trades = res.get('trades', [])
 
-    # EAR-Bricks bauen
-    print('INFO: Berechne EAR-Bricks...')
+    # EAR-Bricks (visuell) — auf dem angezeigten Zeitraum (df = OOS-Periode oder volle Periode)
+    print('INFO: Berechne EAR-Bricks (visuell)...')
     brick_df, brick_size = _build_ear_bricks(df, strategy_params)
     if brick_df.empty:
         print(f'{RED}Keine Bricks berechnet.{NC}')
         return ''
 
-    n_bricks = len(brick_df)
-    x_idx    = list(range(n_bricks))  # sequenzieller Brick-Index als X
-
-    # Tick-Labels: gleichmaessig verteilte Timestamps
+    n_bricks  = len(brick_df)
+    x_idx     = list(range(n_bricks))
     n_ticks   = min(20, n_bricks)
     tick_step = max(1, n_bricks // n_ticks)
     tick_vals = list(range(0, n_bricks, tick_step))
     tick_text = [str(brick_df.iloc[i]['timestamp'])[:10] for i in tick_vals]
 
-    # EAR-Signale
-    signals   = _detect_ear_signals(brick_df, strategy_params)
+    signals    = _detect_ear_signals(brick_df, strategy_params)
     long_sigs  = [i for i, d in signals if d ==  1]
     short_sigs = [i for i, d in signals if d == -1]
-
-    # Backtest
-    print('INFO: Fuehre Backtest durch...')
-    res    = run_backtest(df.copy(), strategy_params, risk_params,
-                          start_capital=start_capital, return_trades=True)
-    trades = res.get('trades', [])
 
     pnl_pct  = res.get('total_pnl_pct', 0.0)
     win_rate = res.get('win_rate', 0.0)
@@ -532,6 +550,33 @@ def run_interactive_chart():
     except ValueError:
         start_capital = 100.0
 
+    # OOS-Modus: Warmup-Start fuer korrekten Brick-State (optional)
+    warmup_start    = None
+    trade_start_date = None
+    oos_file = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
+    if os.path.exists(oos_file):
+        try:
+            with open(oos_file) as f:
+                oos_data = json.load(f)
+            suggested_ws  = oos_data.get('warmup_start', '')
+            suggested_oos = oos_data.get('oos_start', '')
+            if suggested_ws and suggested_oos:
+                print(f'\n  Letzter OOS-Test erkannt:')
+                print(f'  Warmup ab: {suggested_ws}  |  OOS ab: {suggested_oos}')
+                raw = input('  OOS-Modus aktivieren? (j/n) [Standard: n]: ').strip().lower()
+                if raw in ('j', 'y', 'ja', 'yes'):
+                    warmup_start     = suggested_ws
+                    trade_start_date = suggested_oos
+                    print(f'  {GREEN}OOS-Modus aktiv: Warmup={warmup_start}, Trades ab={trade_start_date}{NC}')
+        except Exception:
+            pass
+    if warmup_start is None:
+        raw = input('\nWarmup-Startdatum fuer OOS-Modus (JJJJ-MM-TT) [leer=aus]: ').strip()
+        if raw:
+            warmup_start     = raw
+            trade_start_date = start_date
+            print(f'  {GREEN}OOS-Modus aktiv: Warmup={warmup_start}, Trades ab={trade_start_date}{NC}')
+
     # Telegram
     bot_token, chat_id = '', ''
     send_tg = False
@@ -557,7 +602,9 @@ def run_interactive_chart():
 
         print(f'INFO: Verarbeite {cfg["_filename"]}...')
         path = _generate_chart(symbol, tf, start_date, end_date,
-                               start_capital, strategy, risk)
+                               start_capital, strategy, risk,
+                               trade_start_date=trade_start_date,
+                               warmup_start=warmup_start)
         if path:
             generated.append(path)
             print(f'INFO: Erstelle Chart...')
