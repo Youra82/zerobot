@@ -216,7 +216,7 @@ def _generate_chart(symbol: str, timeframe: str,
 
     pnl_pct  = res.get('total_pnl_pct', 0.0)
     win_rate = res.get('win_rate', 0.0)
-    max_dd   = res.get('max_drawdown_pct', 0.0)
+    max_dd   = res.get('max_drawdown_pct', 0.0) * 100  # fraction → %
     n_trades = res.get('trades_count', 0)
 
     # Equity-Kurve auf Brick-Index-Basis
