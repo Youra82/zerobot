@@ -97,10 +97,20 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
 
         print(f"\n  {BOLD}OOS-Test: {symbol} ({timeframe}){NC}")
         print(f"    In-Sample PnL (Optimizer): {in_pnl:+.1f}%")
-        print(f"    Lade Daten: {warmup_start} → {oos_end} ...")
 
-        # Download full period: warmup + OOS (all upfront)
+        # Download full period: warmup + OOS — Fallback falls Symbol nicht so weit zurückreicht
+        from datetime import datetime as _dt2, timedelta as _td
+        actual_warmup = warmup_start
         full_data = load_data(symbol, timeframe, warmup_start, oos_end)
+        if full_data.empty or len(full_data) < 50:
+            oos_dt = _dt2.strptime(oos_start, '%Y-%m-%d')
+            for years in [3, 2, 1]:
+                fb = (oos_dt - _td(days=years * 365)).strftime('%Y-%m-%d')
+                full_data = load_data(symbol, timeframe, fb, oos_end)
+                if not full_data.empty and len(full_data) >= 50:
+                    actual_warmup = fb
+                    print(f"    Hinweis: Keine Daten ab {warmup_start} — verwende {fb} ({years} Jahre Warmup).")
+                    break
         if full_data.empty or len(full_data) < 50:
             print(f"    {RED}Keine Daten verfügbar — überspringe.{NC}")
             results.append({
@@ -111,6 +121,7 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
             })
             continue
 
+        print(f"    Lade Daten: {actual_warmup} → {oos_end} ...")
         print(f"    {len(full_data)} Kerzen geladen. Starte Walk-Forward OOS-Simulation ...")
 
         # run_backtest with trade_start_date = oos_start
