@@ -112,7 +112,7 @@ def _load_oos_info() -> tuple:
     return oos_start, warmup_start, oos_map
 
 
-def _build_strategies_data(config_files: list, start_date: str, end_date: str) -> dict:
+def _build_strategies_data(config_files: list, fallback_start: str, end_date: str) -> dict:
     from zerobot.analysis.backtester import load_data
     strategies_data = {}
     for path in tqdm(config_files, desc='Lade Configs & Daten'):
@@ -122,11 +122,15 @@ def _build_strategies_data(config_files: list, start_date: str, end_date: str) -
                 config = json.load(f)
             market    = config.get('market', {})
             symbol    = market.get('symbol', '')
-            timeframe = market.get('timeframe', '')
+            timeframe = config.get('market', {}).get('timeframe', '')
             htf       = market.get('htf')
             if not symbol or not timeframe:
                 continue
-            data = load_data(symbol, timeframe, start_date, end_date)
+            # Per-Config Warmup aus _meta.train_start — exakt wie oos_tester.py.
+            # Verhindert "keine Daten" für Configs die erst ab 2023 existieren,
+            # und stellt korrekten EAR-Brick-State an der OOS-Grenze sicher.
+            per_start = config.get('_meta', {}).get('train_start', fallback_start)
+            data = load_data(symbol, timeframe, per_start, end_date)
             if data is None or data.empty or len(data) < 50:
                 print(f"  {Y}Übersprungen (keine Daten): {fname}{NC}")
                 continue
@@ -498,7 +502,7 @@ def main() -> int:
         return 1
 
     print(f"  {len(config_files)} Config(s) gefunden.\n")
-    strategies_data = _build_strategies_data(config_files, data_start, end_date)
+    strategies_data = _build_strategies_data(config_files, data_start, end_date)  # data_start = fallback
     if not strategies_data:
         print(f"{R}  Keine Daten geladen.{NC}")
         return 1
