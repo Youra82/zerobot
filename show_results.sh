@@ -60,10 +60,20 @@ if [ "$MODE" == "3" ]; then
 fi
 
 # ── Zeitraum und Kapital abfragen (Modi 1-2) ─────────────────────────────────
+# OOS-Start aus last_oos_run.json als Default (falls vorhanden)
+OOS_DEFAULT=$($PYTHON -c "
+import json, os, sys
+f = os.path.join('$SCRIPT_DIR', 'artifacts', 'results', 'last_oos_run.json')
+try:
+    print(json.load(open(f)).get('oos_start', '2024-01-01'))
+except:
+    print('2024-01-01')
+" 2>/dev/null || echo "2024-01-01")
+
 echo ""
-read -p "Startdatum (JJJJ-MM-TT) [Standard: 2024-01-01]: " START
+read -p "Startdatum (JJJJ-MM-TT) [Standard: ${OOS_DEFAULT}]: " START
 START="${START//[$'\r\n ']/}"
-START="${START:-2024-01-01}"
+START="${START:-$OOS_DEFAULT}"
 
 read -p "Enddatum   (JJJJ-MM-TT) [Standard: Heute]: " END
 END="${END//[$'\r\n ']/}"
