@@ -49,22 +49,67 @@ def _scan_configs() -> list:
 
 
 def _load_oos_info() -> tuple:
-    """Liest last_oos_run.json. Gibt (oos_start, warmup_start, oos_map) zurück."""
-    if not os.path.exists(OOS_FILE):
-        return None, None, {}
-    try:
-        with open(OOS_FILE) as f:
-            data = json.load(f)
-        oos_start    = data.get('oos_start')
-        warmup_start = data.get('warmup_start')
-        oos_map      = {}
-        for r in data.get('results', []):
-            cfg = r.get('config_file', '')
-            if cfg:
-                oos_map[cfg] = r
-        return oos_start, warmup_start, oos_map
-    except Exception:
-        return None, None, {}
+    """
+    Bestimmt oos_start, warmup_start und oos_map aus mehreren Quellen:
+
+    oos_start    = MAX(alle per-Config _meta.oos_start, last_oos_run.json oos_start)
+                   → konservativster gemeinsamer Startpunkt (kein Lookahead)
+    warmup_start = MIN(alle per-Config _meta.train_start, last_oos_run.json warmup_start)
+                   → genug Warmup-Daten für alle Configs
+    oos_map      = pro Config: OOS-Ergebnis aus last_oos_run.json (für PnL-Filter)
+
+    Wenn Configs aus verschiedenen Pipeline-Läufen stammen (unterschiedliche
+    _meta.oos_start), wird der späteste Termin als gemeinsamer OOS-Start gewählt.
+    """
+    oos_starts    = []
+    warmup_starts = []
+    oos_map       = {}
+
+    # 1. Per-Config _meta.oos_start aus Config-Dateien lesen
+    if os.path.isdir(CONFIGS_DIR):
+        for fn in os.listdir(CONFIGS_DIR):
+            if not (fn.startswith('config_') and fn.endswith('.json')):
+                continue
+            try:
+                with open(os.path.join(CONFIGS_DIR, fn)) as f:
+                    cfg = json.load(f)
+                meta = cfg.get('_meta', {})
+                if meta.get('oos_start'):
+                    oos_starts.append(meta['oos_start'])
+                if meta.get('train_start'):
+                    warmup_starts.append(meta['train_start'])
+            except Exception:
+                pass
+
+    # 2. last_oos_run.json als zusätzliche Quelle + oos_map aufbauen
+    if os.path.exists(OOS_FILE):
+        try:
+            with open(OOS_FILE) as f:
+                data = json.load(f)
+            if data.get('oos_start'):
+                oos_starts.append(data['oos_start'])
+            if data.get('warmup_start'):
+                warmup_starts.append(data['warmup_start'])
+            for r in data.get('results', []):
+                cfg_file = r.get('config_file', '')
+                if cfg_file:
+                    oos_map[cfg_file] = r
+        except Exception:
+            pass
+
+    if not oos_starts:
+        return None, None, oos_map
+
+    oos_start    = max(oos_starts)    # spätester = konservativster gemeinsamer Startpunkt
+    warmup_start = min(warmup_starts) if warmup_starts else None
+
+    if len(set(oos_starts)) > 1:
+        print(f"  {Y}Verschiedene OOS-Startdaten erkannt:{NC}")
+        for d in sorted(set(oos_starts)):
+            print(f"    {d}")
+        print(f"  → Gemeinsamer OOS-Start: {B}{oos_start}{NC} (spätester = sicherster)")
+
+    return oos_start, warmup_start, oos_map
 
 
 def _build_strategies_data(config_files: list, start_date: str, end_date: str) -> dict:
