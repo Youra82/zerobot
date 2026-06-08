@@ -144,8 +144,9 @@ def _ts_to_brick(brick_df, ts_str: str) -> int:
 def _map_all_ohlcv_to_bricks(df, brick_df) -> dict:
     """
     Mappt ALLE OHLCV-Kerzen auf fraktionale Brick-Index-Positionen.
-    Kerzen innerhalb von Brick i erhalten x ∈ [i, i+1).
-    Ergibt dünne Marktkerzen vs. breite EAR-Bricks — echter visueller Vergleich.
+    Kerzen innerhalb Brick i → x ∈ [i, i+1), width = 0.85/n.
+    Wird als go.Bar gezeichnet (explizite Breite), nicht go.Candlestick,
+    damit EAR-Bricks ihre originale Breite behalten.
     """
     import pandas as pd
     import numpy as np
@@ -156,7 +157,6 @@ def _map_all_ohlcv_to_bricks(df, brick_df) -> dict:
     df_utc = df.copy()
     df_utc.index = pd.to_datetime(df_utc.index, utc=True)
 
-    # Jede Kerze → zugehöriger Brick-Index
     positions = np.searchsorted(brick_ts, df_utc.index, side='right') - 1
     positions = np.clip(positions, 0, n_bricks - 1)
 
@@ -164,19 +164,21 @@ def _map_all_ohlcv_to_bricks(df, brick_df) -> dict:
     for i, row in enumerate(df_utc.itertuples()):
         brick_candles[int(positions[i])].append(row)
 
-    result_x, result_o, result_h, result_l, result_c = [], [], [], [], []
+    result_x, result_o, result_h, result_l, result_c, result_w = [], [], [], [], [], []
     for brick_idx in sorted(brick_candles.keys()):
         candles = brick_candles[brick_idx]
         n = len(candles)
+        w = 0.85 / n  # 85% des Brick-Raums, aufgeteilt auf n Kerzen
         for j, row in enumerate(candles):
             result_x.append(brick_idx + (j / n if n > 1 else 0.0))
             result_o.append(float(row.open))
             result_h.append(float(row.high))
             result_l.append(float(row.low))
             result_c.append(float(row.close))
+            result_w.append(w)
 
     return {'x': result_x, 'open': result_o, 'high': result_h,
-            'low': result_l, 'close': result_c}
+            'low': result_l, 'close': result_c, 'width': result_w}
 
 
 def _generate_chart(symbol: str, timeframe: str,
@@ -299,19 +301,51 @@ def _generate_chart(symbol: str, timeframe: str,
     # --- Panel 1: OHLCV-Overlay (optional, blau/schwarz) ---
     if show_ohlcv and df is not None and not df.empty:
         ohlcv = _map_all_ohlcv_to_bricks(df, brick_df)
-        fig.add_trace(go.Candlestick(
-            x=ohlcv['x'],
-            open=ohlcv['open'],
-            high=ohlcv['high'],
-            low=ohlcv['low'],
-            close=ohlcv['close'],
-            name='OHLCV',
-            increasing_line_color='#1e88e5',
-            increasing_fillcolor='rgba(30,136,229,0.4)',
-            decreasing_line_color='#888888',
-            decreasing_fillcolor='rgba(10,10,10,0.7)',
-            showlegend=True,
+        xs     = ohlcv['x']
+        opens  = ohlcv['open']
+        highs  = ohlcv['high']
+        lows   = ohlcv['low']
+        closes = ohlcv['close']
+        widths = ohlcv['width']
+
+        # Dochte (low→high) als dünne Linie, vor den Körpern zeichnen
+        wick_x, wick_y = [], []
+        for x, l, h in zip(xs, lows, highs):
+            wick_x += [x, x, None]
+            wick_y += [l, h, None]
+        fig.add_trace(go.Scatter(
+            x=wick_x, y=wick_y, mode='lines',
+            line=dict(color='#777777', width=0.8),
+            name='OHLCV Dochte', showlegend=False,
         ), row=1, col=1, secondary_y=False)
+
+        # Körper: go.Bar mit expliziter Breite → EAR-Bricks bleiben unbeeinflusst
+        bull_x, bull_base, bull_y, bull_w = [], [], [], []
+        bear_x, bear_base, bear_y, bear_w = [], [], [], []
+        for x, o, h, l, c, w in zip(xs, opens, highs, lows, closes, widths):
+            body_bot = min(o, c)
+            body_h   = max(abs(c - o), (h - l) * 0.005)
+            if c >= o:
+                bull_x.append(x); bull_base.append(body_bot)
+                bull_y.append(body_h); bull_w.append(w)
+            else:
+                bear_x.append(x); bear_base.append(body_bot)
+                bear_y.append(body_h); bear_w.append(w)
+
+        if bull_x:
+            fig.add_trace(go.Bar(
+                x=bull_x, y=bull_y, base=bull_base, width=bull_w,
+                marker_color='rgba(30,136,229,0.75)',
+                marker_line_color='#1e88e5', marker_line_width=0.8,
+                name='OHLCV Bullisch', showlegend=True,
+            ), row=1, col=1, secondary_y=False)
+        if bear_x:
+            fig.add_trace(go.Bar(
+                x=bear_x, y=bear_y, base=bear_base, width=bear_w,
+                marker_color='rgba(15,15,15,0.85)',
+                marker_line_color='#777777', marker_line_width=0.8,
+                name='OHLCV Bearisch', showlegend=True,
+            ), row=1, col=1, secondary_y=False)
 
     # --- Panel 1: EAR-Candlestick ---
     renko_colors = [up_color if d == 1 else down_color
