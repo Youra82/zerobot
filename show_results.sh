@@ -85,29 +85,36 @@ if ! [[ "$CAP" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then CAP=100; fi
 
 echo ""
 
-if false; then
-    : # placeholder — kein Mode 3 mehr hier
-else
-    # Modi 1 + 2
+# ── Mode 2: braucht interaktives stdin → direkter Python-Aufruf ──────────────
+if [ "$MODE" == "2" ]; then
     export ZB_START_DATE="$START"
     export ZB_END_DATE="$END"
     export ZB_CAPITAL="$CAP"
-
-    $PYTHON - <<PYEOF
+    $PYTHON -c "
 import os, sys
 sys.path.insert(0, os.path.join('$SCRIPT_DIR', 'src'))
-from zerobot.analysis.show_results import run_single_analysis, run_shared_mode
+from zerobot.analysis.show_results import run_shared_mode
+run_shared_mode(False, os.environ['ZB_START_DATE'], os.environ['ZB_END_DATE'], int(float(os.environ['ZB_CAPITAL'])), 999.0)
+"
+    deactivate
+    exit 0
+fi
+
+# ── Mode 1 ────────────────────────────────────────────────────────────────────
+export ZB_START_DATE="$START"
+export ZB_END_DATE="$END"
+export ZB_CAPITAL="$CAP"
+
+$PYTHON - <<PYEOF
+import os, sys
+sys.path.insert(0, os.path.join('$SCRIPT_DIR', 'src'))
+from zerobot.analysis.show_results import run_single_analysis
 
 start   = os.environ.get('ZB_START_DATE', '2024-01-01')
 end     = os.environ.get('ZB_END_DATE',   '$END')
 capital = float(os.environ.get('ZB_CAPITAL', '100'))
-mode    = '$MODE'
 
-if mode == '1':
-    run_single_analysis(start, end, int(capital))
-elif mode == '2':
-    run_shared_mode(False, start, end, int(capital), 999.0)
+run_single_analysis(start, end, int(capital))
 PYEOF
-fi
 
 deactivate
