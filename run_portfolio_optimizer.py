@@ -212,7 +212,7 @@ PAIR_COLORS = [
 ]
 
 
-def generate_equity_html(final, capital, start_date, end_date, labels, portfolio_files=None, strategies_data=None):
+def generate_equity_html(final, capital, data_start, end_date, labels, portfolio_files=None, strategies_data=None):
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -345,7 +345,7 @@ def generate_equity_html(final, capital, start_date, end_date, labels, portfolio
     return outfile
 
 
-def generate_trades_excel(final, capital, start_date, end_date, portfolio_files, strategies_data):
+def generate_trades_excel(final, capital, data_start, end_date, portfolio_files, strategies_data):
     try:
         import openpyxl
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -443,7 +443,7 @@ def generate_trades_excel(final, capital, start_date, end_date, portfolio_files,
         ('PnL',             f"{sign}{pnl_total:.1f}%"),
         ('Final Equity',    f"{eq:.2f} USDT"),
         ('Max Drawdown',    f"{dd:.1f}%"),
-        ('Zeitraum',        f"{start_date} → {end_date}"),
+        ('Zeitraum',        f"{data_start} → {end_date}"),
     ]:
         ws.cell(row=summary_row, column=1, value=label).font = Font(bold=True)
         ws.cell(row=summary_row, column=2, value=value)
@@ -550,13 +550,13 @@ def main() -> int:
                 f"{BOT_NAME} Auto-Optimizer\n"
                 f"{len(portfolio_files)} Strategien | {n} Trades | WR: {wr:.1f}%\n"
                 f"PnL: {pnl:+.1f}% | MaxDD: {dd:.1f}% | Equity: {eq:.2f} USDT\n"
-                f"Zeitraum: {start_date} -> {end_date}")
-            html = generate_equity_html(final, capital, start_date, end_date, labels,
+                f"Zeitraum: {data_start} -> {end_date}")
+            html = generate_equity_html(final, capital, data_start, end_date, labels,
                                         portfolio_files, strategies_data)
             if html:
                 _send_telegram_doc(html, caption=f'{BOT_NAME} Portfolio-Equity | PnL: {pnl:+.1f}%')
                 print(f'  {G}✓ HTML via Telegram gesendet.{NC}')
-            excel = generate_trades_excel(final, capital, start_date, end_date,
+            excel = generate_trades_excel(final, capital, data_start, end_date,
                                           portfolio_files, strategies_data)
             if excel:
                 _send_telegram_doc(excel,
@@ -588,14 +588,14 @@ def main() -> int:
                 n   = final.get('trade_count', 0)
                 wr  = final.get('win_rate', 0)
                 eq  = final.get('end_capital', 0)
-                html = generate_equity_html(final, capital, start_date, end_date, labels,
+                html = generate_equity_html(final, capital, data_start, end_date, labels,
                                             portfolio_files, strategies_data)
                 if html:
                     _send_telegram_doc(html,
                         caption=f'{BOT_NAME} Portfolio-Equity | PnL: {pnl:+.1f}% | '
                                 f'Equity: {eq:.2f} USDT | MaxDD: {final.get("max_drawdown_pct", 0):.1f}%')
                     print(f'  {G}✓ HTML via Telegram gesendet.{NC}')
-                excel = generate_trades_excel(final, capital, start_date, end_date,
+                excel = generate_trades_excel(final, capital, data_start, end_date,
                                               portfolio_files, strategies_data)
                 if excel:
                     _send_telegram_doc(excel,

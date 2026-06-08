@@ -1,286 +1,220 @@
 # src/zerobot/analysis/portfolio_simulator.py
+#
+# Portfolio-Simulation via Backtester-Trade-Replay mit geteiltem Equity-Konto.
+#
+# Jede Strategie wird zuerst mit run_backtest() simuliert — exakt gleiche
+# Signal-/SL-Logik wie Mode 1 (Brick-basierter Entry + SL). Danach werden alle
+# Trades chronologisch mit geteiltem Equity-Konto und Margin-Check replayed.
+#
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 import sys
 import os
-import ta
-import math
-import json
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.strategy.ear_engine import EAREngine
-from zerobot.strategy.ear_logic import get_ear_signal
-from zerobot.analysis.backtester import load_data
 
-
-class Bias:
-    BULLISH = "BULLISH"
-    BEARISH = "BEARISH"
-    NEUTRAL = "NEUTRAL"
-
-
-def run_portfolio_simulation(start_capital, strategies_data, start_date, end_date,
-                             verbose=True, trade_start_date: str = None):
+def collect_strategy_events(strat_key: str, strat: dict, start_capital: float,
+                            trade_start_date: str = None) -> list:
     """
-    Chronologische Portfolio-Simulation mit mehreren ZeroBot-EAR-Strategien.
-    trade_start_date: Erst ab diesem Datum werden Positionen geöffnet und die
-                      Equity-Kurve aufgezeichnet (Warmup für EAR-Brick-State davor).
+    Führt run_backtest für eine Strategie aus und gibt eine Liste von Trade-Events zurück.
+    Diese Events können gecacht und für mehrere Portfolio-Simulationen wiederverwendet werden.
     """
-    if verbose:
-        print("\n--- Starte Portfolio-Simulation (ZeroBot EAR)... ---")
-        print("1/3: Bereite Strategie-Daten vor...")
+    from zerobot.analysis.backtester import run_backtest
 
-    processed_strategies = {}
-    all_timestamps       = set()
+    df     = strat['data']
+    params = strat.get('smc_params') or strat.get('strategy', {})
+    risk   = strat.get('risk_params', {})
 
-    _iter = tqdm(strategies_data.items(), desc="Verarbeite Strategien") if verbose else strategies_data.items()
-    for key, strat in _iter:
-        try:
-            df = strat['data'].copy()
-            if df.empty or len(df) < 100:
-                continue
+    try:
+        result = run_backtest(
+            df.copy(), params, risk,
+            start_capital=start_capital,
+            return_trades=True,
+            trade_start_date=trade_start_date,
+            verbose=False,
+        )
+    except Exception:
+        return []
 
-            params = strat.get('smc_params', {})
-            if not params:
-                params = strat.get('strategy', {})
+    leverage = risk.get('leverage', 10)
+    risk_pct = risk.get('risk_per_trade_pct', 1.0) / 100
+    events   = []
 
-            atr_indicator = ta.volatility.AverageTrueRange(
-                high=df['high'], low=df['low'], close=df['close'], window=14)
-            df['atr'] = atr_indicator.average_true_range()
+    for t in result.get('trades', []):
+        entry_px = t.get('entry_price', 0)
+        sl_px    = t.get('stop_loss', entry_px)
+        sl_pct   = abs(entry_px - sl_px) / entry_px if entry_px > 0 else 0.01
+        if sl_pct <= 0:
+            continue
+        events.append({
+            'entry_time':   pd.to_datetime(t['entry_time'], utc=True),
+            'exit_time':    pd.to_datetime(t['exit_time'],  utc=True),
+            'strategy_key': strat_key,
+            'symbol':       strat.get('symbol', strat_key),
+            'timeframe':    strat.get('timeframe', ''),
+            'side':         t['side'],
+            'entry_price':  entry_px,
+            'exit_price':   t['exit_price'],
+            'sl_pct':       sl_pct,
+            'leverage':     leverage,
+            'risk_pct':     risk_pct,
+            'win':          t.get('win', False),
+        })
+    return events
 
-            engine = EAREngine(settings=params)
-            df     = engine.process_dataframe(df)
 
-            df.dropna(subset=['atr'], inplace=True)
-            if df.empty:
-                continue
-
-            processed_strategies[key] = {
-                'data':        df,
-                'params':      params,
-                'risk_params': strat.get('risk_params', {}),
-                'symbol':      strat.get('symbol', key),
-                'timeframe':   strat.get('timeframe', ''),
-            }
-            all_timestamps.update(df.index)
-
-        except Exception as e:
-            print(f"Fehler bei Vorbereitung von {key}: {e}")
-
-    if not processed_strategies:
+def replay_portfolio_events(start_capital: float, all_events: list,
+                            verbose: bool = False):
+    """
+    Chronologischer Replay einer Liste von Trade-Events mit geteiltem Equity-Konto.
+    Kann direkt mit gecachten Events aus collect_strategy_events aufgerufen werden.
+    """
+    if not all_events:
         return None
 
-    sorted_timestamps = sorted(list(all_timestamps))
-    if verbose:
-        print(f"-> {len(sorted_timestamps)} Zeitschritte zu simulieren.")
-        print("2/3: Führe Simulation durch...")
+    timeline = []
+    for ev in all_events:
+        timeline.append(('exit',  ev['exit_time'],  ev))
+        timeline.append(('entry', ev['entry_time'], ev))
+    timeline.sort(key=lambda x: (x[1], 0 if x[0] == 'exit' else 1))
 
-    trade_cutoff = pd.to_datetime(trade_start_date, utc=True) if trade_start_date else None
+    equity            = start_capital
+    peak_equity       = start_capital
+    max_drawdown_pct  = 0.0
+    max_drawdown_date = None
+    min_equity_ever   = start_capital
+    liquidation_date  = None
+    open_positions    = {}
+    trade_history     = []
+    equity_curve      = [{'timestamp': timeline[0][1], 'equity': start_capital}]
 
-    equity             = start_capital
-    peak_equity        = start_capital
-    max_drawdown_pct   = 0.0
-    max_drawdown_date  = None
-    min_equity_ever    = start_capital
-    liquidation_date   = None
-    oos_started        = (trade_cutoff is None)
+    fee_pct = 0.06 / 100
 
-    open_positions = {}
-    trade_history  = []
-    equity_curve   = []
-
-    fee_pct                        = 0.06 / 100
-    max_allowed_effective_leverage = 10
-    absolute_max_notional_value    = 1000000
-    min_notional                   = 5.0
-
-    _ts_iter = tqdm(sorted_timestamps, desc="Simuliere") if verbose else sorted_timestamps
-    for ts in _ts_iter:
+    for event_type, event_time, ev in timeline:
         if liquidation_date:
             break
+        key = ev['strategy_key']
 
-        ts_utc = pd.Timestamp(ts)
-        if ts_utc.tzinfo is None:
-            ts_utc = ts_utc.tz_localize('UTC')
+        if event_type == 'exit':
+            if key not in open_positions:
+                continue
+            pos      = open_positions.pop(key)
+            entry_px = pos['entry_price']
+            exit_px  = ev['exit_price']
+            notional = pos['notional_value']
+            side     = pos['side']
 
-        # OOS-Grenze: Peak erst ab hier tracken, davor keine Trades
-        if not oos_started and ts_utc >= trade_cutoff:
-            oos_started = True
-            peak_equity = equity  # DD nur ab OOS messen
+            pnl_pct = (exit_px / entry_px - 1) if side == 'long' else (1 - exit_px / entry_px)
+            pnl_usd = notional * pnl_pct - notional * fee_pct * 2
+            equity += pnl_usd
 
-        unrealized_pnl     = 0
-        positions_to_close = []
+            trade_history.append({
+                'strategy_key': key,
+                'ts':           event_time.isoformat(),
+                'entry_time':   pos['entry_time'].isoformat(),
+                'symbol':       ev['symbol'],
+                'timeframe':    ev['timeframe'],
+                'direction':    side,
+                'entry':        entry_px,
+                'exit':         exit_px,
+                'pnl':          round(pnl_usd, 4),
+                'leverage':     ev['leverage'],
+                'margin_used':  round(pos['margin_used'], 4),
+            })
 
-        # A) Offene Positionen managen
-        for key, pos in open_positions.items():
-            strat = processed_strategies.get(key)
-            if not strat or ts not in strat['data'].index:
-                if pos.get('last_known_price'):
-                    pnl_mult = 1 if pos['side'] == 'long' else -1
-                    unrealized_pnl += pos['notional_value'] * \
-                        (pos['last_known_price'] / pos['entry_price'] - 1) * pnl_mult
+            eq_now = equity
+            equity_curve.append({'timestamp': event_time, 'equity': eq_now})
+            peak_equity = max(peak_equity, eq_now)
+            dd = (peak_equity - eq_now) / peak_equity if peak_equity > 0 else 0
+            if dd > max_drawdown_pct:
+                max_drawdown_pct  = dd
+                max_drawdown_date = event_time
+            min_equity_ever = min(min_equity_ever, eq_now)
+            if eq_now <= 0 and not liquidation_date:
+                liquidation_date = event_time
+
+        elif event_type == 'entry':
+            if key in open_positions or equity <= 0:
                 continue
 
-            current_candle = strat['data'].loc[ts]
-            pos['last_known_price'] = current_candle['close']
-            exit_price = None
+            sl_pct   = ev['sl_pct']
+            risk_pct = ev['risk_pct']
+            leverage = ev['leverage']
 
-            if pos['side'] == 'long':
-                if current_candle['low']  <= pos['stop_loss']:
-                    exit_price = pos['stop_loss']
-                elif current_candle['high'] >= pos['take_profit']:
-                    exit_price = pos['take_profit']
-            else:
-                if current_candle['high'] >= pos['stop_loss']:
-                    exit_price = pos['stop_loss']
-                elif current_candle['low']  <= pos['take_profit']:
-                    exit_price = pos['take_profit']
+            risk_usd       = equity * risk_pct
+            calc_notional  = risk_usd / sl_pct
+            max_notional   = equity * leverage
+            final_notional = min(calc_notional, max_notional, 1_000_000)
 
-            if exit_price:
-                pnl_pct  = (exit_price / pos['entry_price'] - 1) \
-                           if pos['side'] == 'long' \
-                           else (1 - exit_price / pos['entry_price'])
-                pnl_usd   = pos['notional_value'] * pnl_pct
-                total_fees = pos['notional_value'] * fee_pct * 2
-                net_pnl    = pnl_usd - total_fees
-                equity    += net_pnl
-                trade_history.append({
-                    'strategy_key': key,
-                    'ts':           ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
-                    'entry_time':   pos.get('entry_time', ts).isoformat() if hasattr(pos.get('entry_time', ts), 'isoformat') else str(pos.get('entry_time', ts)),
-                    'symbol':       pos.get('symbol_key', key),
-                    'timeframe':    pos.get('timeframe', ''),
-                    'direction':    pos['side'],
-                    'entry':        pos['entry_price'],
-                    'exit':         exit_price,
-                    'pnl':          net_pnl,
-                    'leverage':     pos.get('leverage', 0),
-                    'margin_used':  round(pos.get('margin_used', 0), 4),
-                })
-                positions_to_close.append(key)
-            else:
-                pnl_mult = 1 if pos['side'] == 'long' else -1
-                unrealized_pnl += pos['notional_value'] * \
-                    (current_candle['close'] / pos['entry_price'] - 1) * pnl_mult
+            if final_notional < 5.0:
+                continue
 
-        for key in positions_to_close:
-            del open_positions[key]
+            margin      = final_notional / leverage
+            used_margin = sum(p['margin_used'] for p in open_positions.values())
+            if used_margin + margin > equity:
+                continue
 
-        # B) Neue Positionen öffnen — nur ab OOS-Start
-        if equity > 0 and oos_started:
-            for key, strat in processed_strategies.items():
-                if key in open_positions:
-                    continue
-                if ts not in strat['data'].index:
-                    continue
-
-                current_candle   = strat['data'].loc[ts]
-                params_for_logic = {"strategy": strat['params'], "risk": strat['risk_params']}
-                side, price      = get_ear_signal(strat['data'], current_candle, params_for_logic, Bias.NEUTRAL)
-
-                if side:
-                    risk_params  = strat['risk_params']
-                    entry_price  = current_candle['close']
-                    current_atr  = current_candle['atr']
-
-                    atr_mult = risk_params.get('atr_multiplier_sl', 2.0)
-                    min_sl   = risk_params.get('min_sl_pct', 0.5) / 100.0
-                    sl_dist  = max(current_atr * atr_mult, entry_price * min_sl)
-                    if sl_dist <= 0:
-                        continue
-
-                    risk_per_trade = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
-                    risk_usd       = equity * risk_per_trade
-                    sl_pct         = sl_dist / entry_price
-                    if sl_pct <= 0:
-                        continue
-
-                    leverage       = risk_params.get('leverage', 10)
-                    calc_notional  = risk_usd / sl_pct
-                    max_notional   = equity * max_allowed_effective_leverage
-                    final_notional = min(calc_notional, max_notional, absolute_max_notional_value)
-                    if final_notional < min_notional:
-                        continue
-
-                    margin_used         = math.ceil((final_notional / leverage) * 100) / 100
-                    current_used_margin = sum(p['margin_used'] for p in open_positions.values())
-                    if current_used_margin + margin_used > equity:
-                        continue
-
-                    rr    = risk_params.get('risk_reward_ratio', 2.0)
-                    act_rr = risk_params.get('trailing_stop_activation_rr', 2.0)
-
-                    if side == 'buy':
-                        sl  = entry_price - sl_dist
-                        tp  = entry_price + sl_dist * rr
-                        act = entry_price + sl_dist * act_rr
-                    else:
-                        sl  = entry_price + sl_dist
-                        tp  = entry_price - sl_dist * rr
-                        act = entry_price - sl_dist * act_rr
-
-                    open_positions[key] = {
-                        'side':             'long' if side == 'buy' else 'short',
-                        'entry_price':      entry_price,
-                        'stop_loss':        sl,
-                        'take_profit':      tp,
-                        'activation_price': act,
-                        'trailing_active':  False,
-                        'peak_price':       entry_price,
-                        'callback_rate':    risk_params.get('trailing_stop_callback_rate_pct', 1.0) / 100,
-                        'notional_value':   final_notional,
-                        'margin_used':      margin_used,
-                        'last_known_price': entry_price,
-                        'entry_time':       ts,
-                        'symbol_key':       strat.get('symbol', key),
-                        'timeframe':        strat.get('timeframe', ''),
-                        'leverage':         leverage,
-                    }
-
-        # C) Tracking — nur ab OOS-Start aufzeichnen
-        if oos_started:
-            current_total_equity = equity + unrealized_pnl
-            equity_curve.append({'timestamp': ts, 'equity': current_total_equity})
-
-            peak_equity = max(peak_equity, current_total_equity)
-            drawdown    = (peak_equity - current_total_equity) / peak_equity if peak_equity > 0 else 0
-            if drawdown > max_drawdown_pct:
-                max_drawdown_pct  = drawdown
-                max_drawdown_date = ts
-
-            min_equity_ever = min(min_equity_ever, current_total_equity)
-            if current_total_equity <= 0 and not liquidation_date:
-                liquidation_date = ts
-
-    if verbose:
-        print("3/3: Bereite Ergebnisse vor...")
+            open_positions[key] = {
+                'entry_price':    ev['entry_price'],
+                'side':           ev['side'],
+                'notional_value': final_notional,
+                'margin_used':    margin,
+                'entry_time':     event_time,
+            }
 
     final_equity  = equity_curve[-1]['equity'] if equity_curve else start_capital
     total_pnl_pct = (final_equity / start_capital - 1) * 100 if start_capital > 0 else 0
     wins          = sum(1 for t in trade_history if t['pnl'] > 0)
     win_rate      = (wins / len(trade_history) * 100) if trade_history else 0
 
-    equity_df = pd.DataFrame(equity_curve)
-    if not equity_df.empty:
-        equity_df['peak']         = equity_df['equity'].cummax()
-        equity_df['drawdown_pct'] = ((equity_df['peak'] - equity_df['equity']) /
-                                     equity_df['peak'].replace(0, np.nan)).fillna(0)
-        equity_df['timestamp']    = pd.to_datetime(equity_df['timestamp'])
-        equity_df.set_index('timestamp', inplace=True, drop=False)
+    eq_df = pd.DataFrame(equity_curve)
+    if not eq_df.empty:
+        eq_df['timestamp']    = pd.to_datetime(eq_df['timestamp'], utc=True)
+        eq_df['peak']         = eq_df['equity'].cummax()
+        eq_df['drawdown_pct'] = ((eq_df['peak'] - eq_df['equity']) /
+                                  eq_df['peak'].replace(0, np.nan)).fillna(0)
+        eq_df.set_index('timestamp', inplace=True, drop=False)
 
     return {
-        "start_capital":    start_capital,
-        "end_capital":      final_equity,
-        "total_pnl_pct":    total_pnl_pct,
-        "trade_count":      len(trade_history),
-        "win_rate":         win_rate,
-        "max_drawdown_pct": max_drawdown_pct * 100,
-        "max_drawdown_date": max_drawdown_date,
-        "min_equity":       min_equity_ever,
-        "liquidation_date": liquidation_date,
-        "trade_history":    trade_history,
-        "equity_curve":     equity_df,
+        'start_capital':     start_capital,
+        'end_capital':       final_equity,
+        'total_pnl_pct':     total_pnl_pct,
+        'trade_count':       len(trade_history),
+        'win_rate':          win_rate,
+        'max_drawdown_pct':  max_drawdown_pct * 100,
+        'max_drawdown_date': max_drawdown_date,
+        'min_equity':        min_equity_ever,
+        'liquidation_date':  liquidation_date,
+        'trade_history':     trade_history,
+        'equity_curve':      eq_df,
     }
+
+
+def run_portfolio_simulation(start_capital, strategies_data, start_date, end_date,
+                             verbose=True, trade_start_date: str = None):
+    """
+    Chronologische Portfolio-Simulation mit geteiltem Equity-Konto.
+    Sammelt Trades per Backtester (korrekte EAR Brick-SL-Logik), dann
+    chronologischer Replay mit geteiltem Equity-Konto und Margin-Check.
+    """
+    if verbose:
+        print('\n--- Starte Portfolio-Simulation (ZeroBot EAR)... ---')
+        print('1/2: Sammle Backtester-Trades aller Strategien...')
+
+    all_events = []
+    for key, strat in strategies_data.items():
+        events = collect_strategy_events(key, strat, start_capital, trade_start_date)
+        if not events and verbose:
+            print(f'  Keine Trades für {key}')
+        all_events.extend(events)
+
+    if not all_events:
+        return None
+
+    if verbose:
+        print(f'  {len(all_events)} Trades aus {len(strategies_data)} Strategien gesammelt.')
+        print('2/2: Replay mit geteiltem Equity-Konto und Margin-Check...')
+
+    return replay_portfolio_events(start_capital, all_events, verbose=verbose)

@@ -9,7 +9,10 @@ import numpy as np
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.analysis.portfolio_simulator import run_portfolio_simulation
+from zerobot.analysis.portfolio_simulator import (
+    collect_strategy_events,
+    replay_portfolio_events,
+)
 
 
 def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date,
@@ -43,18 +46,26 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
             print("  Keine Strategie hatte positiven OOS-PnL — Optimierung abgebrochen.")
             return None
 
-    print("1/3: Analysiere Einzel-Performance...")
-    single_strategy_results = []
+    # ── Schritt 1: Trades pro Strategie einmalig via Backtester sammeln ───────
+    print("1/3: Sammle Backtester-Trades (einmalig pro Strategie)...")
+    events_cache = {}  # filename → list of trade events
 
-    for filename, strat_data in tqdm(strategies_data.items(), desc="Bewerte Einzelstrategien"):
-        strategy_key = f"{strat_data['symbol']}_{strat_data['timeframe']}"
-        sim_data     = {strategy_key: strat_data}
+    for filename, strat_data in tqdm(strategies_data.items(), desc="Backtester-Trades"):
         if 'data' not in strat_data or strat_data['data'].empty:
             continue
+        strategy_key = f"{strat_data['symbol']}_{strat_data['timeframe']}"
+        events_cache[filename] = collect_strategy_events(
+            strategy_key, strat_data, start_capital, trade_start_date)
 
-        result = run_portfolio_simulation(
-            start_capital, sim_data, start_date, end_date,
-            verbose=False, trade_start_date=trade_start_date)
+    # ── Schritt 2: Einzel-Performance bewerten (aus gecachten Events) ─────────
+    print("2/3: Analysiere Einzel-Performance...")
+    single_strategy_results = []
+
+    for filename, strat_data in strategies_data.items():
+        events = events_cache.get(filename, [])
+        if not events:
+            continue
+        result = replay_portfolio_events(start_capital, events)
         if result and not result.get("liquidation_date"):
             actual_max_dd = result.get('max_drawdown_pct', 100.0) / 100.0
             if actual_max_dd <= target_max_dd_decimal:
@@ -76,7 +87,8 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     single_strategy_results.sort(key=lambda x: x['end_capital'], reverse=True)
     print(f"-> {len(single_strategy_results)} valide Einzelstrategien gefunden.")
 
-    print("2/3: Greedy-Portfolio-Aufbau...")
+    # ── Schritt 3: Greedy-Portfolio-Aufbau (gecachte Events, kein Re-Backtest) ─
+    print("3/3: Greedy-Portfolio-Aufbau...")
     portfolio          = []
     portfolio_files    = []
     used_symbols       = set()
@@ -87,15 +99,12 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
         if coin in used_symbols:
             continue
 
-        test_portfolio_files = portfolio_files + [candidate['filename']]
-        test_sim_data_keyed  = {
-            f"{strategies_data[f]['symbol']}_{strategies_data[f]['timeframe']}": strategies_data[f]
-            for f in test_portfolio_files if f in strategies_data
-        }
+        test_files  = portfolio_files + [candidate['filename']]
+        test_events = []
+        for f in test_files:
+            test_events.extend(events_cache.get(f, []))
 
-        result = run_portfolio_simulation(
-            start_capital, test_sim_data_keyed, start_date, end_date,
-            verbose=False, trade_start_date=trade_start_date)
+        result = replay_portfolio_events(start_capital, test_events)
         if not result or result.get("liquidation_date"):
             continue
 
@@ -108,18 +117,14 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
             print(f"  + {candidate['symbol']} / {candidate['timeframe']} "
                   f"(PnL: {result['total_pnl_pct']:.1f}%, MaxDD: {result['max_drawdown_pct']:.1f}%)")
 
-    print("3/3: Finalisiere...")
-
-    # Beste Einzelstrategie (aus OOS-Simulation, bereits sortiert)
+    # ── Entscheidung: Einzelstrategie vs. Portfolio ───────────────────────────
     best_single     = single_strategy_results[0]
     best_single_key = f"{best_single['symbol']}_{best_single['timeframe']}"
-    best_single_sim = run_portfolio_simulation(
-        start_capital, {best_single_key: strategies_data[best_single['filename']]},
-        start_date, end_date, verbose=False, trade_start_date=trade_start_date)
+    best_single_sim = replay_portfolio_events(
+        start_capital, events_cache.get(best_single['filename'], []))
     best_single_pnl = best_single_sim.get('total_pnl_pct', 0) if best_single_sim else 0
 
     if not portfolio_files:
-        # Kein Portfolio gefunden das DD-Constraint erfüllt
         print(f"\n  ★ Kein Portfolio erfüllt MaxDD <= {target_max_dd:.0f}% — "
               f"nehme beste Einzelstrategie: {best_single['symbol']} {best_single['timeframe']} "
               f"(PnL: {best_single_pnl:.1f}%)")
