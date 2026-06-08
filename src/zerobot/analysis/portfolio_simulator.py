@@ -22,8 +22,13 @@ class Bias:
     NEUTRAL = "NEUTRAL"
 
 
-def run_portfolio_simulation(start_capital, strategies_data, start_date, end_date, verbose=True):
-    """Chronologische Portfolio-Simulation mit mehreren ZeroBot-EAR-Strategien."""
+def run_portfolio_simulation(start_capital, strategies_data, start_date, end_date,
+                             verbose=True, trade_start_date: str = None):
+    """
+    Chronologische Portfolio-Simulation mit mehreren ZeroBot-EAR-Strategien.
+    trade_start_date: Erst ab diesem Datum werden Positionen geöffnet und die
+                      Equity-Kurve aufgezeichnet (Warmup für EAR-Brick-State davor).
+    """
     if verbose:
         print("\n--- Starte Portfolio-Simulation (ZeroBot EAR)... ---")
         print("1/3: Bereite Strategie-Daten vor...")
@@ -73,18 +78,21 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
         print(f"-> {len(sorted_timestamps)} Zeitschritte zu simulieren.")
         print("2/3: Führe Simulation durch...")
 
+    trade_cutoff = pd.to_datetime(trade_start_date, utc=True) if trade_start_date else None
+
     equity             = start_capital
     peak_equity        = start_capital
     max_drawdown_pct   = 0.0
     max_drawdown_date  = None
     min_equity_ever    = start_capital
     liquidation_date   = None
+    oos_started        = (trade_cutoff is None)
 
     open_positions = {}
     trade_history  = []
     equity_curve   = []
 
-    fee_pct                       = 0.06 / 100
+    fee_pct                        = 0.06 / 100
     max_allowed_effective_leverage = 10
     absolute_max_notional_value    = 1000000
     min_notional                   = 5.0
@@ -94,7 +102,16 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
         if liquidation_date:
             break
 
-        unrealized_pnl    = 0
+        ts_utc = pd.Timestamp(ts)
+        if ts_utc.tzinfo is None:
+            ts_utc = ts_utc.tz_localize('UTC')
+
+        # OOS-Grenze: Peak erst ab hier tracken, davor keine Trades
+        if not oos_started and ts_utc >= trade_cutoff:
+            oos_started = True
+            peak_equity = equity  # DD nur ab OOS messen
+
+        unrealized_pnl     = 0
         positions_to_close = []
 
         # A) Offene Positionen managen
@@ -152,8 +169,8 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
         for key in positions_to_close:
             del open_positions[key]
 
-        # B) Neue Positionen öffnen
-        if equity > 0:
+        # B) Neue Positionen öffnen — nur ab OOS-Start
+        if equity > 0 and oos_started:
             for key, strat in processed_strategies.items():
                 if key in open_positions:
                     continue
@@ -223,19 +240,20 @@ def run_portfolio_simulation(start_capital, strategies_data, start_date, end_dat
                         'leverage':         leverage,
                     }
 
-        # C) Tracking
-        current_total_equity = equity + unrealized_pnl
-        equity_curve.append({'timestamp': ts, 'equity': current_total_equity})
+        # C) Tracking — nur ab OOS-Start aufzeichnen
+        if oos_started:
+            current_total_equity = equity + unrealized_pnl
+            equity_curve.append({'timestamp': ts, 'equity': current_total_equity})
 
-        peak_equity = max(peak_equity, current_total_equity)
-        drawdown    = (peak_equity - current_total_equity) / peak_equity if peak_equity > 0 else 0
-        if drawdown > max_drawdown_pct:
-            max_drawdown_pct  = drawdown
-            max_drawdown_date = ts
+            peak_equity = max(peak_equity, current_total_equity)
+            drawdown    = (peak_equity - current_total_equity) / peak_equity if peak_equity > 0 else 0
+            if drawdown > max_drawdown_pct:
+                max_drawdown_pct  = drawdown
+                max_drawdown_date = ts
 
-        min_equity_ever = min(min_equity_ever, current_total_equity)
-        if current_total_equity <= 0 and not liquidation_date:
-            liquidation_date = ts
+            min_equity_ever = min(min_equity_ever, current_total_equity)
+            if current_total_equity <= 0 and not liquidation_date:
+                liquidation_date = ts
 
     if verbose:
         print("3/3: Bereite Ergebnisse vor...")

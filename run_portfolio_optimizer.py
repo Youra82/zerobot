@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, 'src'))
 
 CONFIGS_DIR   = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
 SETTINGS_PATH = os.path.join(PROJECT_ROOT, 'settings.json')
+OOS_FILE      = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
 
 B  = '\033[1;37m'
 G  = '\033[0;32m'
@@ -45,6 +46,25 @@ def _scan_configs() -> list:
         for f in os.listdir(CONFIGS_DIR)
         if f.endswith('.json')
     ])
+
+
+def _load_oos_info() -> tuple:
+    """Liest last_oos_run.json. Gibt (oos_start, warmup_start, oos_map) zurück."""
+    if not os.path.exists(OOS_FILE):
+        return None, None, {}
+    try:
+        with open(OOS_FILE) as f:
+            data = json.load(f)
+        oos_start    = data.get('oos_start')
+        warmup_start = data.get('warmup_start')
+        oos_map      = {}
+        for r in data.get('results', []):
+            cfg = r.get('config_file', '')
+            if cfg:
+                oos_map[cfg] = r
+        return oos_start, warmup_start, oos_map
+    except Exception:
+        return None, None, {}
 
 
 def _build_strategies_data(config_files: list, start_date: str, end_date: str) -> dict:
@@ -403,15 +423,27 @@ def main() -> int:
     opt           = settings.get('optimization_settings', {})
     capital       = args.capital or float(opt.get('start_capital', 100))
     max_dd        = args.max_dd
-    end_date      = args.end_date   or date.today().strftime('%Y-%m-%d')
-    start_date    = args.start_date or (
-        date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    end_date      = args.end_date or date.today().strftime('%Y-%m-%d')
     max_positions = int(settings.get('live_trading_settings', {}).get('max_open_positions', 10))
+
+    # OOS-Daten automatisch laden
+    oos_start, warmup_start, oos_map = _load_oos_info()
+
+    # Daten ab Warmup laden (EAR-Brick-State), Trades erst ab OOS-Start
+    data_start     = warmup_start or args.start_date or (
+        date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    trade_start    = oos_start  # None wenn kein OOS-File vorhanden
 
     print(f"\n{'─'*72}")
     print(f"{B}  ZeroBot — Portfolio-Optimizer (EAR){NC}")
-    print(f"  Kapital: {capital:.0f} USDT | MaxDD <= {max_dd:.0f}% | "
-          f"Zeitraum: {start_date} → {end_date}")
+    print(f"  Kapital: {capital:.0f} USDT | MaxDD <= {max_dd:.0f}%")
+    if oos_start:
+        print(f"  {Y}OOS-Periode:  {oos_start} → {end_date}  (DUNKLER BEREICH){NC}")
+        print(f"  Warmup:       {data_start} → {oos_start}  (EAR Brick-Aufbau, keine Trades)")
+        print(f"  OOS-Filter:   Nur Strategien mit positivem OOS-PnL werden zugelassen")
+    else:
+        print(f"  {Y}Kein last_oos_run.json gefunden — nutze Zeitraum ohne OOS-Filter{NC}")
+        print(f"  Zeitraum: {data_start} → {end_date}")
     print(f"{'─'*72}\n")
 
     config_files = _scan_configs()
@@ -421,13 +453,16 @@ def main() -> int:
         return 1
 
     print(f"  {len(config_files)} Config(s) gefunden.\n")
-    strategies_data = _build_strategies_data(config_files, start_date, end_date)
+    strategies_data = _build_strategies_data(config_files, data_start, end_date)
     if not strategies_data:
         print(f"{R}  Keine Daten geladen.{NC}")
         return 1
 
     from zerobot.analysis.portfolio_optimizer import run_portfolio_optimizer
-    result = run_portfolio_optimizer(capital, strategies_data, start_date, end_date, max_dd)
+    result = run_portfolio_optimizer(
+        capital, strategies_data, data_start, end_date, max_dd,
+        trade_start_date=trade_start,
+        oos_map=oos_map if oos_map else None)
 
     if not result or not result.get('optimal_portfolio'):
         print(f"{R}  Kein Portfolio erfüllt MaxDD <= {max_dd:.0f}%.{NC}\n")

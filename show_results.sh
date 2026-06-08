@@ -39,7 +39,27 @@ if [ "$MODE" == "4" ]; then
     exit 0
 fi
 
-# ── Zeitraum und Kapital abfragen (Modi 1-3) ─────────────────────────────────
+# ── Mode 3: Portfolio-Optimizer (OOS-Auto-Detect, kein Startdatum nötig) ─────
+if [ "$MODE" == "3" ]; then
+    echo ""
+    read -p "Startkapital in USDT [Standard: 100]: " CAP
+    CAP="${CAP//[$'\r\n ']/}"
+    if ! [[ "$CAP" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then CAP=100; fi
+
+    read -p "Max. Drawdown in % [Standard: 30]: " MAX_DD
+    MAX_DD="${MAX_DD//[$'\r\n ']/}"
+    if ! [[ "$MAX_DD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then MAX_DD=30; fi
+
+    END="$(date +%Y-%m-%d)"
+    $PYTHON "$SCRIPT_DIR/run_portfolio_optimizer.py" \
+        --capital "$CAP" \
+        --max-dd  "$MAX_DD" \
+        --end-date "$END"
+    deactivate
+    exit 0
+fi
+
+# ── Zeitraum und Kapital abfragen (Modi 1-2) ─────────────────────────────────
 echo ""
 read -p "Startdatum (JJJJ-MM-TT) [Standard: 2024-01-01]: " START
 START="${START//[$'\r\n ']/}"
@@ -55,17 +75,8 @@ if ! [[ "$CAP" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then CAP=100; fi
 
 echo ""
 
-if [ "$MODE" == "3" ]; then
-    read -p "Max. Drawdown in % [Standard: 30]: " MAX_DD
-    MAX_DD="${MAX_DD//[$'\r\n ']/}"
-    if ! [[ "$MAX_DD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then MAX_DD=30; fi
-
-    $PYTHON "$SCRIPT_DIR/run_portfolio_optimizer.py" \
-        --capital "$CAP" \
-        --max-dd  "$MAX_DD" \
-        --start-date "$START" \
-        --end-date   "$END"
-
+if false; then
+    : # placeholder — kein Mode 3 mehr hier
 else
     # Modi 1 + 2
     export ZB_START_DATE="$START"
