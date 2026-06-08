@@ -110,17 +110,39 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
 
     print("3/3: Finalisiere...")
 
+    # Beste Einzelstrategie (aus OOS-Simulation, bereits sortiert)
+    best_single     = single_strategy_results[0]
+    best_single_key = f"{best_single['symbol']}_{best_single['timeframe']}"
+    best_single_sim = run_portfolio_simulation(
+        start_capital, {best_single_key: strategies_data[best_single['filename']]},
+        start_date, end_date, verbose=False, trade_start_date=trade_start_date)
+    best_single_pnl = best_single_sim.get('total_pnl_pct', 0) if best_single_sim else 0
+
     if not portfolio_files:
-        best_single = single_strategy_results[0]
-        key         = f"{best_single['symbol']}_{best_single['timeframe']}"
-        final_sim   = run_portfolio_simulation(
-            start_capital, {key: strategies_data[best_single['filename']]},
-            start_date, end_date, verbose=False, trade_start_date=trade_start_date)
+        # Kein Portfolio gefunden das DD-Constraint erfüllt
+        print(f"\n  ★ Kein Portfolio erfüllt MaxDD <= {target_max_dd:.0f}% — "
+              f"nehme beste Einzelstrategie: {best_single['symbol']} {best_single['timeframe']} "
+              f"(PnL: {best_single_pnl:.1f}%)")
         return {
             'optimal_portfolio': [best_single['filename']],
-            'final_result':      final_sim,
+            'final_result':      best_single_sim,
         }
 
+    portfolio_pnl = best_portfolio_sim.get('total_pnl_pct', 0) if best_portfolio_sim else 0
+
+    if best_single_pnl > portfolio_pnl:
+        print(f"\n  ★ Einzelstrategie schlägt Portfolio:")
+        print(f"    {best_single['symbol']} {best_single['timeframe']}: {best_single_pnl:+.1f}%"
+              f"  >  Portfolio ({len(portfolio_files)} Strategien): {portfolio_pnl:+.1f}%")
+        print(f"  → Nehme Einzelstrategie.")
+        return {
+            'optimal_portfolio': [best_single['filename']],
+            'final_result':      best_single_sim,
+        }
+
+    print(f"\n  Portfolio ({len(portfolio_files)} Strategien, {portfolio_pnl:+.1f}%) schlägt "
+          f"beste Einzelstrategie ({best_single['symbol']} {best_single['timeframe']}, "
+          f"{best_single_pnl:+.1f}%) → Portfolio wird verwendet.")
     return {
         'optimal_portfolio': portfolio_files,
         'final_result':      best_portfolio_sim,
