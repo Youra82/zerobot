@@ -141,23 +141,42 @@ def _ts_to_brick(brick_df, ts_str: str) -> int:
         return 0
 
 
-def _map_ohlcv_to_bricks(df, brick_df) -> dict:
+def _map_all_ohlcv_to_bricks(df, brick_df) -> dict:
     """
-    Mappt OHLCV-Kerzen auf Brick-Indizes: pro Brick die auslösende Kerze.
-    Gibt dict mit Listen open/high/low/close zurück.
+    Mappt ALLE OHLCV-Kerzen auf fraktionale Brick-Index-Positionen.
+    Kerzen innerhalb von Brick i erhalten x ∈ [i, i+1).
+    Ergibt dünne Marktkerzen vs. breite EAR-Bricks — echter visueller Vergleich.
     """
     import pandas as pd
-    df_idx = df.index
-    result = {'open': [], 'high': [], 'low': [], 'close': []}
-    for i in range(len(brick_df)):
-        ts = pd.to_datetime(brick_df.iloc[i]['timestamp'], utc=True)
-        idx = df_idx.searchsorted(ts)
-        idx = min(idx, len(df) - 1)
-        result['open'].append(float(df.iloc[idx]['open']))
-        result['high'].append(float(df.iloc[idx]['high']))
-        result['low'].append(float(df.iloc[idx]['low']))
-        result['close'].append(float(df.iloc[idx]['close']))
-    return result
+    import numpy as np
+    from collections import defaultdict
+
+    brick_ts = pd.to_datetime(brick_df['timestamp'].values, utc=True)
+    n_bricks = len(brick_ts)
+    df_utc = df.copy()
+    df_utc.index = pd.to_datetime(df_utc.index, utc=True)
+
+    # Jede Kerze → zugehöriger Brick-Index
+    positions = np.searchsorted(brick_ts, df_utc.index, side='right') - 1
+    positions = np.clip(positions, 0, n_bricks - 1)
+
+    brick_candles = defaultdict(list)
+    for i, row in enumerate(df_utc.itertuples()):
+        brick_candles[int(positions[i])].append(row)
+
+    result_x, result_o, result_h, result_l, result_c = [], [], [], [], []
+    for brick_idx in sorted(brick_candles.keys()):
+        candles = brick_candles[brick_idx]
+        n = len(candles)
+        for j, row in enumerate(candles):
+            result_x.append(brick_idx + (j / n if n > 1 else 0.0))
+            result_o.append(float(row.open))
+            result_h.append(float(row.high))
+            result_l.append(float(row.low))
+            result_c.append(float(row.close))
+
+    return {'x': result_x, 'open': result_o, 'high': result_h,
+            'low': result_l, 'close': result_c}
 
 
 def _generate_chart(symbol: str, timeframe: str,
@@ -279,19 +298,18 @@ def _generate_chart(symbol: str, timeframe: str,
 
     # --- Panel 1: OHLCV-Overlay (optional, blau/schwarz) ---
     if show_ohlcv and df is not None and not df.empty:
-        ohlcv = _map_ohlcv_to_bricks(df, brick_df)
+        ohlcv = _map_all_ohlcv_to_bricks(df, brick_df)
         fig.add_trace(go.Candlestick(
-            x=x_idx,
+            x=ohlcv['x'],
             open=ohlcv['open'],
             high=ohlcv['high'],
             low=ohlcv['low'],
             close=ohlcv['close'],
             name='OHLCV',
             increasing_line_color='#1e88e5',
-            increasing_fillcolor='rgba(30,136,229,0.35)',
-            decreasing_line_color='#9e9e9e',
-            decreasing_fillcolor='rgba(0,0,0,0.55)',
-            opacity=0.65,
+            increasing_fillcolor='rgba(30,136,229,0.4)',
+            decreasing_line_color='#888888',
+            decreasing_fillcolor='rgba(10,10,10,0.7)',
             showlegend=True,
         ), row=1, col=1, secondary_y=False)
 
