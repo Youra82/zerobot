@@ -60,7 +60,11 @@ def run_single_analysis(start_date, end_date, start_capital):
             symbol    = config['market']['symbol']
             timeframe = config['market']['timeframe']
             print(f"\nAnalysiere: {filename}...")
-            data = load_data(symbol, timeframe, start_date, end_date)
+
+            # Per-Config Warmup aus _meta.train_start — gleiche Logik wie Mode 3.
+            # Stellt korrekten EAR-Brick-State an der OOS-Grenze sicher.
+            per_warmup = config.get('_meta', {}).get('train_start', start_date)
+            data = load_data(symbol, timeframe, per_warmup, end_date)
             if data.empty:
                 print(f"--> WARNUNG: Keine Daten für {symbol} ({timeframe}). Überspringe.")
                 continue
@@ -71,7 +75,8 @@ def run_single_analysis(start_date, end_date, start_capital):
             strategy_params['timeframe'] = timeframe
             strategy_params['htf']       = config['market'].get('htf')
 
-            result = run_backtest(data.copy(), strategy_params, risk_params, start_capital, verbose=False)
+            result = run_backtest(data.copy(), strategy_params, risk_params, start_capital,
+                                  verbose=False, trade_start_date=start_date)
             all_results.append({
                 "Strategie":  f"{symbol} ({timeframe})",
                 "Trades":     result.get('trades_count', 0),
@@ -143,9 +148,10 @@ def run_shared_mode(is_auto: bool, start_date, end_date, start_capital, target_m
         try:
             with open(os.path.join(configs_dir, filename), 'r') as f:
                 config = json.load(f)
-            symbol    = config['market']['symbol']
-            timeframe = config['market']['timeframe']
-            data      = load_data(symbol, timeframe, start_date, end_date)
+            symbol     = config['market']['symbol']
+            timeframe  = config['market']['timeframe']
+            per_warmup = config.get('_meta', {}).get('train_start', start_date)
+            data       = load_data(symbol, timeframe, per_warmup, end_date)
             if not data.empty:
                 strategies_data[filename] = {
                     'symbol':      symbol,
@@ -183,7 +189,8 @@ def run_shared_mode(is_auto: bool, start_date, end_date, start_capital, target_m
                 print(f"\nKein Portfolio erfüllt Max DD <= {target_max_dd:.1f}%.")
         else:
             sim_data = {v['symbol'] + "_" + v['timeframe']: v for v in strategies_data.values()}
-            results  = run_portfolio_simulation(start_capital, sim_data, start_date, end_date)
+            results  = run_portfolio_simulation(start_capital, sim_data, start_date, end_date,
+                                               trade_start_date=start_date)
             if results:
                 print("\n" + "=" * 60)
                 print("     Portfolio-Simulations-Ergebnis")
