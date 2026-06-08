@@ -141,12 +141,32 @@ def _ts_to_brick(brick_df, ts_str: str) -> int:
         return 0
 
 
+def _map_ohlcv_to_bricks(df, brick_df) -> dict:
+    """
+    Mappt OHLCV-Kerzen auf Brick-Indizes: pro Brick die auslösende Kerze.
+    Gibt dict mit Listen open/high/low/close zurück.
+    """
+    import pandas as pd
+    df_idx = df.index
+    result = {'open': [], 'high': [], 'low': [], 'close': []}
+    for i in range(len(brick_df)):
+        ts = pd.to_datetime(brick_df.iloc[i]['timestamp'], utc=True)
+        idx = df_idx.searchsorted(ts)
+        idx = min(idx, len(df) - 1)
+        result['open'].append(float(df.iloc[idx]['open']))
+        result['high'].append(float(df.iloc[idx]['high']))
+        result['low'].append(float(df.iloc[idx]['low']))
+        result['close'].append(float(df.iloc[idx]['close']))
+    return result
+
+
 def _generate_chart(symbol: str, timeframe: str,
                     start_date: str, end_date: str,
                     start_capital: float,
                     strategy_params: dict, risk_params: dict,
                     trade_start_date: str = None,
-                    warmup_start: str = None) -> str:
+                    warmup_start: str = None,
+                    show_ohlcv: bool = False) -> str:
     """Generiert HTML-EAR-Chart. Gibt Pfad zur HTML-Datei zurueck."""
     try:
         import plotly.graph_objects as go
@@ -256,6 +276,24 @@ def _generate_chart(symbol: str, timeframe: str,
         row_heights=[0.62, 0.14, 0.24],
         subplot_titles=['', 'Volumen', 'ATR'],
     )
+
+    # --- Panel 1: OHLCV-Overlay (optional, blau/schwarz) ---
+    if show_ohlcv and df is not None and not df.empty:
+        ohlcv = _map_ohlcv_to_bricks(df, brick_df)
+        fig.add_trace(go.Candlestick(
+            x=x_idx,
+            open=ohlcv['open'],
+            high=ohlcv['high'],
+            low=ohlcv['low'],
+            close=ohlcv['close'],
+            name='OHLCV',
+            increasing_line_color='#1e88e5',
+            increasing_fillcolor='rgba(30,136,229,0.35)',
+            decreasing_line_color='#9e9e9e',
+            decreasing_fillcolor='rgba(0,0,0,0.55)',
+            opacity=0.65,
+            showlegend=True,
+        ), row=1, col=1, secondary_y=False)
 
     # --- Panel 1: EAR-Candlestick ---
     renko_colors = [up_color if d == 1 else down_color
@@ -577,6 +615,10 @@ def run_interactive_chart():
             trade_start_date = start_date
             print(f'  {GREEN}OOS-Modus aktiv: Warmup={warmup_start}, Trades ab={trade_start_date}{NC}')
 
+    # OHLCV-Overlay
+    raw = input('\nOHLCV-Kerzen ueberlagern? Blau=bullisch, Schwarz=bearisch (j/n) [Standard: n]: ').strip().lower()
+    show_ohlcv = raw in ('j', 'y', 'ja', 'yes')
+
     # Telegram
     bot_token, chat_id = '', ''
     send_tg = False
@@ -604,7 +646,8 @@ def run_interactive_chart():
         path = _generate_chart(symbol, tf, start_date, end_date,
                                start_capital, strategy, risk,
                                trade_start_date=trade_start_date,
-                               warmup_start=warmup_start)
+                               warmup_start=warmup_start,
+                               show_ohlcv=show_ohlcv)
         if path:
             generated.append(path)
             print(f'INFO: Erstelle Chart...')
