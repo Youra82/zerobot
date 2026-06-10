@@ -142,6 +142,11 @@ class Exchange:
             for k in ('instId', 'symbol'):
                 if k in clean_params:
                     del clean_params[k]
+            # Bitget v2 one-way mode: tradeSide muss immer gesetzt sein
+            if clean_params.get('reduceOnly'):
+                clean_params.setdefault('tradeSide', 'close')
+            else:
+                clean_params.setdefault('tradeSide', 'open')
             return self.exchange.create_order(symbol, 'market', side, rounded_amount, params=clean_params)
         except ccxt.InsufficientFunds as e:
             logger.error("Zu wenig Guthaben für Order.")
