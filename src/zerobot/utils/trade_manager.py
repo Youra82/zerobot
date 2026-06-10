@@ -351,9 +351,9 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             f"SL: ${sl_rounded:.6f} ({sl_dist/entry_price*100:.3f}%) | Risk: {risk_usdt:.2f} USDT"
         )
 
-        entry_order = exchange.create_market_order(
-            symbol, pos_side, amount,
-            {'leverage': leverage, 'marginMode': margin_mode})
+        # marginMode und leverage werden bereits per set_margin_mode/set_leverage gesetzt.
+        # Nicht nochmal in Order-Params übergeben — verursacht Error 40774 (one-way mode conflict).
+        entry_order = exchange.create_market_order(symbol, pos_side, amount, {})
 
         if not entry_order:
             return
