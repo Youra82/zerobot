@@ -34,7 +34,10 @@ class Exchange:
             'apiKey':   self.account.get('apiKey'),
             'secret':   self.account.get('secret'),
             'password': self.account.get('password'),
-            'options':  {'defaultType': 'swap'},
+            'options':  {
+                'defaultType': 'swap',
+                'hedged': False,  # One-Way-Modus (kein holdSide in Orders)
+            },
             'enableRateLimit': True,
         })
         try:

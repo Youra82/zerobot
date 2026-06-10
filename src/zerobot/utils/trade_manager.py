@@ -112,7 +112,8 @@ def housekeeper_routine(exchange, symbol, logger):
             pos_info   = position[0]
             close_side = 'sell' if pos_info['side'] == 'long' else 'buy'
             logger.warning(f"Housekeeper: Schließe verwaiste Position ({pos_info['side']} {pos_info['contracts']})...")
-            exchange.create_market_order(symbol, close_side, float(pos_info['contracts']), {'reduceOnly': True})
+            exchange.create_market_order(symbol, close_side, float(pos_info['contracts']),
+                                         {'reduceOnly': True, 'tradeSide': 'close'})
             time.sleep(3)
 
         if exchange.fetch_open_positions(symbol):
@@ -139,7 +140,8 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
             logger.warning(f"_close_position: contracts={contracts}, überspringe.")
             return
 
-        exchange.create_market_order(symbol, close_side, contracts, {'reduceOnly': True})
+        exchange.create_market_order(symbol, close_side, contracts,
+                                     {'reduceOnly': True, 'tradeSide': 'close'})
         logger.info(f"Position geschlossen ({reason}): {pos_side.upper()} {contracts} {symbol}")
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
@@ -351,9 +353,8 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             f"SL: ${sl_rounded:.6f} ({sl_dist/entry_price*100:.3f}%) | Risk: {risk_usdt:.2f} USDT"
         )
 
-        # marginMode und leverage werden bereits per set_margin_mode/set_leverage gesetzt.
-        # Nicht nochmal in Order-Params übergeben — verursacht Error 40774 (one-way mode conflict).
-        entry_order = exchange.create_market_order(symbol, pos_side, amount, {})
+        # tradeSide: 'open' = Bitget v2 One-Way-Modus (kein holdSide/Hedge-Mode)
+        entry_order = exchange.create_market_order(symbol, pos_side, amount, {'tradeSide': 'open'})
 
         if not entry_order:
             return
@@ -367,7 +368,9 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         contracts = float(pos_info['contracts'])
 
         # Nur SL-Order auf der Börse platzieren — TP wird durch Brick-Reversal-Check ausgelöst
-        exchange.place_trigger_market_order(symbol, tsl_side, contracts, sl_rounded, {'reduceOnly': True})
+        # tradeSide: 'close' = Bitget v2 One-Way-Modus für schließende Orders
+        exchange.place_trigger_market_order(symbol, tsl_side, contracts, sl_rounded,
+                                            {'reduceOnly': True, 'tradeSide': 'close'})
 
         # Entry-Zeit und Seite für Brick-Reversal-Check speichern
         set_trade_lock(symbol_timeframe)
