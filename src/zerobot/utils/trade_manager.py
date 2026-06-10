@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import ccxt
 import numpy as np
@@ -373,7 +373,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         set_trade_lock(symbol_timeframe)
         trade_lock = load_or_create_trade_lock()
         trade_lock[f"{symbol_timeframe}_last_entry_price"] = entry_price
-        trade_lock[f"{symbol_timeframe}_entry_time"]       = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        trade_lock[f"{symbol_timeframe}_entry_time"]       = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         trade_lock[f"{symbol_timeframe}_entry_side"]       = 'long' if signal_side == 'buy' else 'short'
         trade_lock[f"{symbol_timeframe}_entry_brick_count"] = len(bricks)
         save_trade_lock(trade_lock)
