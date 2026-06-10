@@ -134,31 +134,28 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
 
     trigger_orders = exchange.fetch_open_trigger_orders(symbol)
     if len(trigger_orders) == 0:
-        print("WARNUNG: Keine Trigger-Orders im API-Return (kann bei PEPE vorkommen).")
+        print("WARNUNG: Keine Trigger-Orders (EAR-SL möglicherweise bereits gefeuert).")
     else:
         print(f"-> Trigger-Orders gefunden: {len(trigger_orders)}")
 
+    # Titanbot-Muster: sofort Cancel → sofort Close (kein Sleep dazwischen, pos_info aus Schritt 2)
     print("\n[Schritt 3/3] Schließe Position...")
     exchange.cancel_all_orders_for_symbol(symbol)
-    time.sleep(3)
 
-    # Frische Position holen — könnte durch SL bereits geschlossen worden sein (kurzer SL bei EAR)
-    current_pos = exchange.fetch_open_positions(symbol)
-    if current_pos:
-        amt           = abs(float(current_pos[0].get('contracts', 0)))
-        side_to_close = 'sell' if current_pos[0].get('side', '').lower() == 'long' else 'buy'
-        if amt > 0:
-            close_order = exchange.create_market_order(
-                symbol, side_to_close, amt, {'reduceOnly': True})
-            if close_order:
-                print("-> Position manuell geschlossen.")
-            else:
-                # 22002 "No position to close" — SL hat die Position bereits geschlossen.
-                # Kein Fehler: finaler Assert prüft ob wirklich nichts mehr offen ist.
-                print("-> Close fehlgeschlagen (Position bereits durch SL geschlossen — korrekt).")
-            time.sleep(4)
+    amount_to_close = abs(float(pos_info.get('contracts', 0)))
+    side_to_close   = 'sell' if pos_info.get('side', '').lower() == 'long' else 'buy'
+
+    if amount_to_close > 0:
+        close_order = exchange.create_market_order(
+            symbol, side_to_close, amount_to_close, {'reduceOnly': True})
+        if close_order:
+            print(f"-> Position erfolgreich geschlossen ({side_to_close} {amount_to_close}).")
+        else:
+            # 22002 "No position to close" — EAR-SL hat Position bereits geschlossen: korrekt.
+            print("-> Close fehlgeschlagen (Position durch EAR-SL geschlossen — korrekt).")
+        time.sleep(5)
     else:
-        print("-> Position bereits geschlossen (SL gefeuert — korrektes Verhalten).")
+        print("-> Keine Contracts zum Schließen.")
 
     exchange.cancel_all_orders_for_symbol(symbol)
     time.sleep(2)
