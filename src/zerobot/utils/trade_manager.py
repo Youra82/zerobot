@@ -329,8 +329,8 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         risk_pct      = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
         risk_usdt     = balance * risk_pct
         sl_pct_equiv  = sl_dist / entry_price
-        calc_notional = risk_usdt / sl_pct_equiv
-        max_notional  = balance * leverage
+        calc_notional  = risk_usdt / sl_pct_equiv
+        max_notional   = balance * leverage * 0.98  # 2% Puffer für Eröffnungsgebühren
         final_notional = min(calc_notional, max_notional, 1_000_000)
         amount         = final_notional / entry_price
 

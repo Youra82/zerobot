@@ -56,7 +56,7 @@ def test_setup():
         'risk': {
             # Nur ZeroBot-relevante Felder (kein ATR-SL, kein RRR — Brick-basiertes SL)
             'margin_mode':        'isolated',
-            'risk_per_trade_pct': 15.0,  # groß genug für Mindest-Notional bei PEPE
+            'risk_per_trade_pct': 5.0,   # calc_notional bleibt unter max_notional-Cap bei PEPE
             'leverage':           20,
         },
     }
