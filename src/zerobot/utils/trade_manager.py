@@ -339,9 +339,11 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         if signal_side == 'buy':
             pos_side  = 'buy'
             tsl_side  = 'sell'
+            hold_side = 'long'
         else:
             pos_side  = 'sell'
             tsl_side  = 'buy'
+            hold_side = 'short'
 
         sl_rounded = float(exchange.exchange.price_to_precision(symbol, sl_price))
 
@@ -350,7 +352,6 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             f"SL: ${sl_rounded:.6f} ({sl_dist/entry_price*100:.3f}%) | Risk: {risk_usdt:.2f} USDT"
         )
 
-        # tradeSide: 'open' = Bitget v2 One-Way-Modus (kein holdSide/Hedge-Mode)
         entry_order = exchange.create_market_order(symbol, pos_side, amount, {'tradeSide': 'open'})
 
         if not entry_order:
@@ -364,10 +365,10 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         pos_info  = position[0]
         contracts = float(pos_info['contracts'])
 
-        # Nur SL-Order auf der Börse platzieren — TP wird durch Brick-Reversal-Check ausgelöst
-        # tradeSide: 'close' = Bitget v2 One-Way-Modus für schließende Orders
+        # holdSide: Hedge-Mode erfordert explizite Angabe welches Leg geschlossen wird
         exchange.place_trigger_market_order(symbol, tsl_side, contracts, sl_rounded,
-                                            {'reduceOnly': True, 'tradeSide': 'close'})
+                                            {'reduceOnly': True, 'tradeSide': 'close',
+                                             'holdSide': hold_side, 'marginMode': 'isolated'})
 
         # Entry-Zeit und Seite für Brick-Reversal-Check speichern
         set_trade_lock(symbol_timeframe)

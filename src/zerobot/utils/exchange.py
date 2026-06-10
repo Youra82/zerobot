@@ -150,6 +150,7 @@ class Exchange:
                 clean_params.setdefault('marginMode', 'isolated')
             else:
                 clean_params.setdefault('tradeSide', 'open')
+                clean_params.setdefault('marginMode', 'isolated')
             return self.exchange.create_order(symbol, 'market', side, rounded_amount, params=clean_params)
         except ccxt.InsufficientFunds as e:
             logger.error("Zu wenig Guthaben für Order.")
