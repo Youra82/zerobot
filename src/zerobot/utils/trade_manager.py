@@ -365,10 +365,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         pos_info  = position[0]
         contracts = float(pos_info['contracts'])
 
-        # holdSide: Hedge-Mode erfordert explizite Angabe welches Leg geschlossen wird
-        exchange.place_trigger_market_order(symbol, tsl_side, contracts, sl_rounded,
-                                            {'reduceOnly': True, 'tradeSide': 'close',
-                                             'holdSide': hold_side, 'marginMode': 'isolated'})
+        exchange.place_sl_trigger_order(symbol, tsl_side, contracts, sl_rounded, hold_side)
 
         # Entry-Zeit und Seite für Brick-Reversal-Check speichern
         set_trade_lock(symbol_timeframe)

@@ -176,6 +176,37 @@ class Exchange:
             logger.error(f"Fehler bei Trigger Order: {e}")
             return None
 
+    def place_sl_trigger_order(self, symbol, side, amount, trigger_price, hold_side):
+        """SL-Plan-Order direkt via Bitget v2 API — umgeht CCXT holdSide-Problem bei Hedge-Mode.
+        hold_side: 'long' (Long-SL, side='sell') oder 'short' (Short-SL, side='buy')"""
+        if not self.markets:
+            return None
+        try:
+            market         = self.exchange.market(symbol)
+            rounded_price  = float(self.exchange.price_to_precision(symbol, trigger_price))
+            rounded_amount = float(self.exchange.amount_to_precision(symbol, amount))
+            request = {
+                'symbol':       market['id'],
+                'productType':  'USDT-FUTURES',
+                'marginMode':   'isolated',
+                'marginCoin':   'USDT',
+                'size':         str(rounded_amount),
+                'side':         side,
+                'tradeSide':    'close',
+                'orderType':    'market',
+                'triggerType':  'mark_price',
+                'triggerPrice': str(rounded_price),
+                'planType':     'normal_plan',
+                'holdSide':     hold_side,
+            }
+            logger.info(f"SL Trigger Order ({hold_side}): {side} {rounded_amount} @ {rounded_price}")
+            response = self.exchange.privateMixPostV2MixOrderPlacePlanOrder(request)
+            logger.info(f"SL Trigger Order platziert: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"SL Trigger Order fehlgeschlagen ({symbol}): {e}")
+            return None
+
     def place_trailing_stop_order(self, symbol, side, amount, activation_price, callback_rate_decimal, params={}):
         if not self.markets:
             return None
