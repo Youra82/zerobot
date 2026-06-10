@@ -328,28 +328,31 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             logger.error("Kein USDT-Guthaben.")
             return
 
-        ticker      = exchange.fetch_ticker(symbol)
-        entry_price = signal_price or ticker['last']
-
-        # SL = Open des Entry-Bricks (= Close des vorherigen Bricks = 1 Brick-Abstand)
+        # Entry = letzter Brick-Close (wie im Backtester: bricks[bidx]['close'])
+        # SL    = vorheriger Brick-Close (wie im Backtester: bricks[bidx-1]['close'])
         bricks = engine._build_bricks(recent_data, init_lc=init_lc, init_direction=init_dir)
         if bricks:
             save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
         if bricks and len(bricks) > 1:
-            sl_price = bricks[-2]['close']  # vorheriges Brick-Level
+            entry_price = bricks[-1]['close']   # letzter Brick-Level (= Backtester-Entry)
+            sl_price    = bricks[-2]['close']   # vorheriger Brick-Level (= Backtester-SL)
         else:
-            sl_price = entry_price * (0.99 if signal_side == 'buy' else 1.01)
+            ticker      = exchange.fetch_ticker(symbol)
+            entry_price = ticker['last']
+            sl_price    = entry_price * (0.99 if signal_side == 'buy' else 1.01)
 
         sl_dist = abs(entry_price - sl_price)
         if sl_dist <= 0:
             logger.error("SL-Abstand = 0, überspringe.")
             return
 
-        risk_pct       = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
-        risk_usdt      = balance * risk_pct
-        sl_pct_equiv   = sl_dist / entry_price
-        calc_notional  = risk_usdt / sl_pct_equiv
-        amount         = calc_notional / entry_price
+        risk_pct      = risk_params.get('risk_per_trade_pct', 1.0) / 100.0
+        risk_usdt     = balance * risk_pct
+        sl_pct_equiv  = sl_dist / entry_price
+        calc_notional = risk_usdt / sl_pct_equiv
+        max_notional  = balance * leverage
+        final_notional = min(calc_notional, max_notional, 1_000_000)
+        amount         = final_notional / entry_price
 
         min_amount = exchange.markets[symbol].get('limits', {}).get('amount', {}).get('min', 0.0)
         if amount < min_amount:
