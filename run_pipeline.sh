@@ -331,6 +331,13 @@ fi
 
 echo ""
 echo "======================================================="
+echo -e "  ${CYAN}Brick-State-Initialisierung (Live-Bot Startpunkt)${NC}"
+echo "======================================================="
+echo ""
+$PYTHON "$SCRIPT_DIR/init_brick_states.py" --force
+
+echo ""
+echo "======================================================="
 echo -e "  ${GREEN}Pipeline abgeschlossen!${NC}"
 echo ""
 if [[ -n "$OOS_DATE" ]]; then
