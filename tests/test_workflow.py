@@ -12,7 +12,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.trade_manager import check_and_open_new_position, housekeeper_routine
-from zerobot.utils.trade_manager import set_trade_lock, is_trade_locked
+from zerobot.utils.trade_manager import set_trade_lock, save_trade_lock, is_trade_locked, load_or_create_trade_lock
 from zerobot.utils.timeframe_utils import determine_htf
 
 
@@ -106,7 +106,9 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     print(f"\n--- Verfügbares Guthaben: {bal:.4f} USDT ---")
 
     with patch('zerobot.utils.trade_manager.set_trade_lock'), \
+         patch('zerobot.utils.trade_manager.save_trade_lock'), \
          patch('zerobot.utils.trade_manager.is_trade_locked', return_value=False), \
+         patch('zerobot.utils.trade_manager.load_or_create_trade_lock', return_value={}), \
          patch('zerobot.utils.trade_manager.get_ear_signal', return_value=('buy', None)):
 
         print("\n[Schritt 1/3] Simuliere Buy-Signal (EAR gemockt) und prüfe Trade-Eröffnung...")
