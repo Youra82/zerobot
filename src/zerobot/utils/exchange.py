@@ -142,9 +142,12 @@ class Exchange:
             for k in ('instId', 'symbol'):
                 if k in clean_params:
                     del clean_params[k]
-            # Bitget v2 one-way mode: tradeSide muss immer gesetzt sein
-            if clean_params.get('reduceOnly'):
-                clean_params.setdefault('tradeSide', 'close')
+            # Bitget v2 one-way mode: tradeSide steuert open/close.
+            # reduceOnly NICHT an CCXT übergeben: CCXT würde reduceOnly='YES' + marginMode='crossed'
+            # setzen → Bitget 22002 ("No position to close") bei isolated Positionen.
+            if clean_params.pop('reduceOnly', False):
+                clean_params['tradeSide'] = 'close'
+                clean_params.setdefault('marginMode', 'isolated')
             else:
                 clean_params.setdefault('tradeSide', 'open')
             return self.exchange.create_order(symbol, 'market', side, rounded_amount, params=clean_params)
