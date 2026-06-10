@@ -18,7 +18,7 @@ from zerobot.utils.timeframe_utils import determine_htf
 
 @pytest.fixture(scope="module")
 def test_setup():
-    print("\n--- Starte ZeroBot Workflow-Test (EAR) ---")
+    print("\n--- Starte ZeroBot Workflow-Test (EAR / PEPE) ---")
 
     secret_path = os.path.join(PROJECT_ROOT, 'secret.json')
     if not os.path.exists(secret_path):
@@ -40,30 +40,25 @@ def test_setup():
     except Exception as e:
         pytest.fail(f"Exchange-Fehler: {e}")
 
+    # PEPE: kleine Mindestgröße, gut zum Testen (wie stbot)
     symbol    = 'PEPE/USDT:USDT'
     timeframe = '15m'
-    htf       = determine_htf(timeframe)
 
     params = {
-        'market':   {'symbol': symbol, 'timeframe': timeframe, 'htf': htf},
+        'market': {'symbol': symbol, 'timeframe': timeframe, 'htf': None},
         'strategy': {
-            'atr_multiplier':     1.0,
-            'trend_min_bricks':   3,
-            'reversal_bricks':    2,
-            'vol_filter_enabled': False,
-            'min_vol_ratio':      1.2,
+            # Reale EAR-Engine-Parameter (Defaults aus EAREngine.__init__)
+            'base_pct':         0.004,
+            'k_entropy':        0.8,
+            'h_window':         10,
+            'trend_min_bricks': 3,
         },
         'risk': {
-            'margin_mode':                     'isolated',
-            'risk_per_trade_pct':              15.0,
-            'risk_reward_ratio':               2.0,
-            'leverage':                        20,
-            'trailing_stop_activation_rr':     1.5,
-            'trailing_stop_callback_rate_pct': 0.5,
-            'atr_multiplier_sl':               1.0,
-            'min_sl_pct':                      4.0,
+            # Nur ZeroBot-relevante Felder (kein ATR-SL, kein RRR — Brick-basiertes SL)
+            'margin_mode':        'isolated',
+            'risk_per_trade_pct': 15.0,  # groß genug für Mindest-Notional bei PEPE
+            'leverage':           20,
         },
-        'behavior': {'use_longs': True, 'use_shorts': True},
     }
 
     test_logger = logging.getLogger("test-logger")
@@ -114,7 +109,7 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
          patch('zerobot.utils.trade_manager.is_trade_locked', return_value=False), \
          patch('zerobot.utils.trade_manager.get_ear_signal', return_value=('buy', None)):
 
-        print("\n[Schritt 1/3] Simuliere Buy-Signal und prüfe Trade-Eröffnung...")
+        print("\n[Schritt 1/3] Simuliere Buy-Signal (EAR gemockt) und prüfe Trade-Eröffnung...")
         check_and_open_new_position(exchange, None, None, params, telegram_config, logger)
 
     print("-> Warte 5s auf Order-Ausführung...")
@@ -131,7 +126,10 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     print(f"-> Position eröffnet: {pos_info['side'].upper()} {pos_info['contracts']} PEPE.")
 
     trigger_orders = exchange.fetch_open_trigger_orders(symbol)
-    print(f"-> Trigger-Orders: {len(trigger_orders)}")
+    if len(trigger_orders) == 0:
+        print("WARNUNG: Keine Trigger-Orders im API-Return (kann bei PEPE vorkommen).")
+    else:
+        print(f"-> Trigger-Orders gefunden: {len(trigger_orders)}")
 
     print("\n[Schritt 3/3] Schließe Position...")
     exchange.cancel_all_orders_for_symbol(symbol)
@@ -144,7 +142,7 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
         close_order = exchange.create_market_order(
             symbol, side_to_close, amount_to_close, params={'reduceOnly': True})
         assert close_order, "Konnte Position nicht schließen!"
-        print(f"-> Position geschlossen.")
+        print("-> Position geschlossen.")
         time.sleep(4)
 
     exchange.cancel_all_orders_for_symbol(symbol)
