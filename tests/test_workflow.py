@@ -13,7 +13,6 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.trade_manager import check_and_open_new_position, housekeeper_routine
 from zerobot.utils.trade_manager import set_trade_lock, save_trade_lock, is_trade_locked, load_or_create_trade_lock
-from zerobot.utils.timeframe_utils import determine_htf
 
 
 @pytest.fixture(scope="module")
@@ -40,23 +39,21 @@ def test_setup():
     except Exception as e:
         pytest.fail(f"Exchange-Fehler: {e}")
 
-    # PEPE: kleine Mindestgröße, gut zum Testen (wie stbot)
+    # PEPE: kleine Mindestgröße (wie dnabot/mbot)
     symbol    = 'PEPE/USDT:USDT'
     timeframe = '15m'
 
     params = {
         'market': {'symbol': symbol, 'timeframe': timeframe, 'htf': None},
         'strategy': {
-            # Reale EAR-Engine-Parameter (Defaults aus EAREngine.__init__)
             'base_pct':         0.004,
             'k_entropy':        0.8,
             'h_window':         10,
             'trend_min_bricks': 3,
         },
         'risk': {
-            # Nur ZeroBot-relevante Felder (kein ATR-SL, kein RRR — Brick-basiertes SL)
             'margin_mode':        'isolated',
-            'risk_per_trade_pct': 5.0,   # calc_notional bleibt unter max_notional-Cap bei PEPE
+            'risk_per_trade_pct': 0.1,   # SEHR KLEINES Risiko — wie dnabot (0.1%)
             'leverage':           20,
         },
     }
@@ -105,13 +102,21 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     bal = exchange.fetch_balance_usdt()
     print(f"\n--- Verfügbares Guthaben: {bal:.4f} USDT ---")
 
+    if bal < 5.0:
+        pytest.skip(f"Zu wenig Guthaben ({bal:.2f} USDT < 5 USDT) für Live-Test.")
+
+    # Fixer Testwert (wie dnabot: simulated_balance=50) — unabhängig vom echten Kontostand.
+    # Mit risk=0.1% und sl≈0.6%: notional = 50*0.001/0.006 ≈ 8 USDT (knapp über Mindest-Notional).
+    SIMULATED_BALANCE = 50.0
+
     with patch('zerobot.utils.trade_manager.set_trade_lock'), \
          patch('zerobot.utils.trade_manager.save_trade_lock'), \
          patch('zerobot.utils.trade_manager.is_trade_locked', return_value=False), \
          patch('zerobot.utils.trade_manager.load_or_create_trade_lock', return_value={}), \
+         patch.object(exchange, 'fetch_balance_usdt', return_value=SIMULATED_BALANCE), \
          patch('zerobot.utils.trade_manager.get_ear_signal', return_value=('buy', None)):
 
-        print("\n[Schritt 1/3] Simuliere Buy-Signal (EAR gemockt) und prüfe Trade-Eröffnung...")
+        print(f"\n[Schritt 1/3] Simuliere Buy-Signal (EAR gemockt, Balance={SIMULATED_BALANCE} USDT)...")
         check_and_open_new_position(exchange, None, None, params, telegram_config, logger)
 
     print("-> Warte 5s auf Order-Ausführung...")
@@ -121,7 +126,7 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     position = exchange.fetch_open_positions(symbol)
 
     if not position:
-        pytest.fail(f"Position nicht eröffnet. Guthaben war: {bal:.2f} USDT")
+        pytest.fail(f"Position nicht eröffnet (sim. Balance={SIMULATED_BALANCE} USDT, echtes Guthaben={bal:.2f} USDT).")
 
     assert len(position) == 1
     pos_info = position[0]
@@ -137,15 +142,19 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     exchange.cancel_all_orders_for_symbol(symbol)
     time.sleep(3)
 
-    amount_to_close = abs(float(pos_info.get('contracts', 0)))
-    side_to_close   = 'sell' if pos_info.get('side', '').lower() == 'long' else 'buy'
-
-    if amount_to_close > 0:
-        close_order = exchange.create_market_order(
-            symbol, side_to_close, amount_to_close, params={'reduceOnly': True})
-        assert close_order, "Konnte Position nicht schließen!"
-        print("-> Position geschlossen.")
-        time.sleep(4)
+    # Frische Position holen — könnte durch SL bereits geschlossen worden sein (kurzer SL bei EAR)
+    current_pos = exchange.fetch_open_positions(symbol)
+    if current_pos:
+        amt           = abs(float(current_pos[0].get('contracts', 0)))
+        side_to_close = 'sell' if current_pos[0].get('side', '').lower() == 'long' else 'buy'
+        if amt > 0:
+            close_order = exchange.create_market_order(
+                symbol, side_to_close, amt, {'reduceOnly': True})
+            assert close_order, "Konnte Position nicht schließen!"
+            print("-> Position manuell geschlossen.")
+            time.sleep(4)
+    else:
+        print("-> Position bereits geschlossen (SL gefeuert — korrektes Verhalten).")
 
     exchange.cancel_all_orders_for_symbol(symbol)
     time.sleep(2)
