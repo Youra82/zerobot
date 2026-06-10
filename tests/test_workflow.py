@@ -69,8 +69,7 @@ def test_setup():
         time.sleep(2)
         pos = exchange.fetch_open_positions(symbol)
         if pos:
-            exchange.create_market_order(symbol, 'sell' if pos[0]['side'] == 'long' else 'buy',
-                                         float(pos[0]['contracts']), {'reduceOnly': True})
+            exchange.flash_close_position(symbol)
             time.sleep(2)
         print("-> Ausgangszustand sauber.")
     except Exception as e:
@@ -81,14 +80,10 @@ def test_setup():
     print("\n[Teardown] Räume auf...")
     try:
         exchange.cancel_all_orders_for_symbol(symbol)
-        time.sleep(2)
+        time.sleep(1)
         position = exchange.fetch_open_positions(symbol)
         if position:
-            exchange.create_market_order(
-                symbol,
-                'sell' if position[0]['side'] == 'long' else 'buy',
-                float(position[0]['contracts']),
-                {'reduceOnly': True})
+            exchange.flash_close_position(symbol)
             time.sleep(3)
         exchange.cancel_all_orders_for_symbol(symbol)
         print("-> Aufräumen abgeschlossen.")
@@ -130,7 +125,8 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
 
     assert len(position) == 1
     pos_info = position[0]
-    print(f"-> Position eröffnet: {pos_info['side'].upper()} {pos_info['contracts']} PEPE.")
+    print(f"-> Position eröffnet: {pos_info['side'].upper()} {pos_info['contracts']} PEPE "
+          f"(hedged={pos_info.get('hedged')}, marginMode={pos_info.get('marginMode')}).")
 
     trigger_orders = exchange.fetch_open_trigger_orders(symbol)
     if len(trigger_orders) == 0:
@@ -138,24 +134,15 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     else:
         print(f"-> Trigger-Orders gefunden: {len(trigger_orders)}")
 
-    # Titanbot-Muster: sofort Cancel → sofort Close (kein Sleep dazwischen, pos_info aus Schritt 2)
-    print("\n[Schritt 3/3] Schließe Position...")
+    # Flash-Close: Bitget /api/v2/mix/order/close-positions — umgeht hedge/one-way Probleme
+    print("\n[Schritt 3/3] Schließe Position (Flash-Close)...")
     exchange.cancel_all_orders_for_symbol(symbol)
-
-    amount_to_close = abs(float(pos_info.get('contracts', 0)))
-    side_to_close   = 'sell' if pos_info.get('side', '').lower() == 'long' else 'buy'
-
-    if amount_to_close > 0:
-        close_order = exchange.create_market_order(
-            symbol, side_to_close, amount_to_close, {'reduceOnly': True})
-        if close_order:
-            print(f"-> Position erfolgreich geschlossen ({side_to_close} {amount_to_close}).")
-        else:
-            # 22002 "No position to close" — EAR-SL hat Position bereits geschlossen: korrekt.
-            print("-> Close fehlgeschlagen (Position durch EAR-SL geschlossen — korrekt).")
-        time.sleep(5)
+    close_result = exchange.flash_close_position(symbol)
+    if close_result:
+        print("-> Flash-Close ausgeführt.")
     else:
-        print("-> Keine Contracts zum Schließen.")
+        print("-> Flash-Close fehlgeschlagen (Position möglicherweise durch SL bereits geschlossen).")
+    time.sleep(5)
 
     exchange.cancel_all_orders_for_symbol(symbol)
     time.sleep(2)

@@ -262,5 +262,20 @@ class Exchange:
             logger.error(f"Fehler beim Abrufen/Löschen der Rest-Orders: {e}")
         return count
 
+    def flash_close_position(self, symbol):
+        """Bitget Flash-Close: schließt alle Positionen für ein Symbol direkt.
+        Umgeht hedge/one-way Modus-Probleme — funktioniert unabhängig von tradeSide/holdSide."""
+        if not self.markets:
+            return None
+        try:
+            market  = self.exchange.market(symbol)
+            request = {'productType': 'USDT-FUTURES', 'symbol': market['id']}
+            response = self.exchange.privateMixPostV2MixOrderClosePositions(request)
+            logger.info(f"Flash-Close {symbol}: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"Flash-Close fehlgeschlagen ({symbol}): {e}")
+            return None
+
     def cleanup_all_open_orders(self, symbol):
         return self.cancel_all_orders_for_symbol(symbol)

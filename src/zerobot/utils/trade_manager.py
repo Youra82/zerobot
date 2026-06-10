@@ -109,11 +109,9 @@ def housekeeper_routine(exchange, symbol, logger):
 
         position = exchange.fetch_open_positions(symbol)
         if position:
-            pos_info   = position[0]
-            close_side = 'sell' if pos_info['side'] == 'long' else 'buy'
+            pos_info = position[0]
             logger.warning(f"Housekeeper: Schließe verwaiste Position ({pos_info['side']} {pos_info['contracts']})...")
-            exchange.create_market_order(symbol, close_side, float(pos_info['contracts']),
-                                         {'reduceOnly': True, 'tradeSide': 'close'})
+            exchange.flash_close_position(symbol)
             time.sleep(3)
 
         if exchange.fetch_open_positions(symbol):
@@ -140,8 +138,7 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
             logger.warning(f"_close_position: contracts={contracts}, überspringe.")
             return
 
-        exchange.create_market_order(symbol, close_side, contracts,
-                                     {'reduceOnly': True, 'tradeSide': 'close'})
+        exchange.flash_close_position(symbol)
         logger.info(f"Position geschlossen ({reason}): {pos_side.upper()} {contracts} {symbol}")
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
