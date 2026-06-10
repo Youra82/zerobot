@@ -196,25 +196,15 @@ def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_confi
             return
         save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
 
-        # Entry-Zeitpunkt aus trade_lock lesen
-        trade_lock      = load_or_create_trade_lock()
-        entry_time_str  = trade_lock.get(f"{symbol_timeframe}_entry_time")
-        entry_time      = None
-        if entry_time_str:
-            try:
-                entry_time = pd.to_datetime(entry_time_str, utc=True)
-            except Exception:
-                pass
+        # Brick-Zähler beim Entry aus trade_lock lesen (wie Backtester: Bricks nach Entry-Brick-Index)
+        trade_lock        = load_or_create_trade_lock()
+        entry_brick_count = trade_lock.get(f"{symbol_timeframe}_entry_brick_count")
+        entry_time_str    = trade_lock.get(f"{symbol_timeframe}_entry_time")
 
-        # Nur Bricks NACH dem Entry betrachten
-        if entry_time is not None:
-            post_entry_bricks = [
-                b for b in bricks
-                if b['candle_idx'] < len(recent_data)
-                and recent_data.index[b['candle_idx']] > entry_time
-            ]
+        if entry_brick_count is not None:
+            post_entry_bricks = bricks[int(entry_brick_count):]
         else:
-            post_entry_bricks = bricks[-10:]  # Fallback: letzte 10 Bricks
+            post_entry_bricks = bricks[-10:]  # Fallback
 
         if not post_entry_bricks:
             logger.info("Noch keine neuen Bricks seit Entry – Position hält.")
@@ -262,18 +252,6 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         recent_data['atr'] = atr_indicator.average_true_range()
         recent_data.dropna(subset=['atr'], inplace=True)
 
-        # MTF Bias
-        htf         = params['market'].get('htf')
-        market_bias = Bias.NEUTRAL
-        if htf:
-            try:
-                htf_data = exchange.fetch_recent_ohlcv(symbol, htf, limit=100)
-                if not htf_data.empty:
-                    market_bias = determine_market_bias(htf_data)
-                    logger.info(f"HTF ({htf}) Bias: {market_bias}")
-            except Exception as e:
-                logger.warning(f"HTF-Daten konnten nicht abgerufen werden: {e}")
-
         # EAR Engine — mit persistiertem Brick-State (pfadunabhaengig)
         engine      = EAREngine(settings=strat_params)
         brick_state = load_brick_state(symbol_timeframe)
@@ -284,7 +262,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             recent_data, init_lc=init_lc, init_direction=init_dir)
         current_candle = processed_data.iloc[-1]
 
-        signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, market_bias)
+        signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, Bias.NEUTRAL)
 
         if not signal_side:
             # State nach jedem Lauf speichern (auch wenn kein Signal)
@@ -397,6 +375,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         trade_lock[f"{symbol_timeframe}_last_entry_price"] = entry_price
         trade_lock[f"{symbol_timeframe}_entry_time"]       = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
         trade_lock[f"{symbol_timeframe}_entry_side"]       = 'long' if signal_side == 'buy' else 'short'
+        trade_lock[f"{symbol_timeframe}_entry_brick_count"] = len(bricks)
         save_trade_lock(trade_lock)
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
