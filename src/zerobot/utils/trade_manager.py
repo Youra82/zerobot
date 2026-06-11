@@ -124,12 +124,22 @@ def housekeeper_routine(exchange, symbol, logger):
         return False
 
 
+def _pnl_str(entry_price, exit_price, side):
+    """Berechnet PnL-Prozent als formatierten String."""
+    try:
+        ep  = float(entry_price)
+        xp  = float(exit_price)
+        pct = ((xp - ep) / ep * 100) if side == 'long' else ((ep - xp) / ep * 100)
+        return f"{pct:+.2f}%"
+    except Exception:
+        return "?"
+
+
 def _close_position(exchange, symbol, pos_info, params, telegram_config, logger, reason='brick_reversal'):
     """Schließt eine offene Position per Market Order."""
     try:
         contracts  = float(pos_info.get('contracts', 0))
         pos_side   = pos_info.get('side', '').lower()
-        close_side = 'sell' if pos_side == 'long' else 'buy'
 
         exchange.cancel_all_orders_for_symbol(symbol)
         time.sleep(1)
@@ -141,16 +151,25 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
         exchange.flash_close_position(symbol)
         logger.info(f"Position geschlossen ({reason}): {pos_side.upper()} {contracts} {symbol}")
 
+        # _position_open-Flag löschen (Bot hat selbst geschlossen, kein SL-Fire-Signal nötig)
+        tf               = params['market']['timeframe']
+        symbol_timeframe = f"{symbol.replace('/', '-')}_{tf}"
+        trade_lock       = load_or_create_trade_lock()
+        trade_lock.pop(f'{symbol_timeframe}_position_open', None)
+        save_trade_lock(trade_lock)
+
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
             try:
-                ticker     = exchange.fetch_ticker(symbol)
-                exit_price = ticker['last']
-                tf         = params['market']['timeframe']
+                ticker      = exchange.fetch_ticker(symbol)
+                exit_price  = ticker['last']
+                entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
+                pnl         = _pnl_str(entry_price, exit_price, pos_side) if entry_price else "?"
                 msg = (
-                    f"ZEROBOT (EAR) – Position geschlossen\n"
+                    f"ZEROBOT (EAR) - Trade geschlossen (TP)\n"
                     f"- Symbol: {symbol} ({tf})\n"
                     f"- Seite: {pos_side.upper()}\n"
-                    f"- Exit: ${exit_price:.6f}\n"
+                    f"- Exit: {exit_price:.8f}\n"
+                    f"- PnL: {pnl}\n"
                     f"- Grund: {reason}"
                 )
                 send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
@@ -367,21 +386,23 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
 
         exchange.place_sl_trigger_order(symbol, tsl_side, contracts, sl_rounded, hold_side)
 
-        # Entry-Zeit und Seite für Brick-Reversal-Check speichern
+        # Entry-Zeit, Seite und Position-Flag speichern
         set_trade_lock(symbol_timeframe)
         trade_lock = load_or_create_trade_lock()
-        trade_lock[f"{symbol_timeframe}_last_entry_price"] = entry_price
-        trade_lock[f"{symbol_timeframe}_entry_time"]       = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        trade_lock[f"{symbol_timeframe}_entry_side"]       = 'long' if signal_side == 'buy' else 'short'
+        trade_lock[f"{symbol_timeframe}_last_entry_price"]  = entry_price
+        trade_lock[f"{symbol_timeframe}_entry_time"]        = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        trade_lock[f"{symbol_timeframe}_entry_side"]        = 'long' if signal_side == 'buy' else 'short'
         trade_lock[f"{symbol_timeframe}_entry_brick_count"] = len(bricks)
+        trade_lock[f"{symbol_timeframe}_position_open"]     = True
         save_trade_lock(trade_lock)
 
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
             msg = (
-                f"ZEROBOT (EAR): {symbol} ({timeframe})\n"
+                f"ZEROBOT (EAR) - Trade eroeffnet\n"
+                f"- Symbol: {symbol} ({timeframe})\n"
                 f"- Richtung: {pos_side.upper()}\n"
-                f"- Entry: ${entry_price:.6f}\n"
-                f"- SL: ${sl_rounded:.6f} (Brick-Open, {sl_dist/entry_price*100:.3f}%)\n"
+                f"- Entry: {entry_price:.8f}\n"
+                f"- SL: {sl_rounded:.8f} ({sl_dist/entry_price*100:.2f}%)\n"
                 f"- TP: erster Gegenbrick (dynamisch)"
             )
             send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
@@ -396,15 +417,51 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
 
 
 def full_trade_cycle(exchange, model, scaler, params, telegram_config, logger):
-    symbol = params['market']['symbol']
+    symbol           = params['market']['symbol']
+    timeframe        = params['market']['timeframe']
+    symbol_timeframe = f"{symbol.replace('/', '-')}_{timeframe}"
     try:
         pos = exchange.fetch_open_positions(symbol)
         if pos:
-            # Position offen: SL liegt auf der Börse, TP via Brick-Reversal prüfen
             check_and_close_on_brick_reversal(exchange, pos[0], params, telegram_config, logger)
         else:
+            # Prüfen ob Bitget-SL gefeuert hat (Position war offen, jetzt weg, kein Bot-Exit)
+            trade_lock = load_or_create_trade_lock()
+            if trade_lock.get(f'{symbol_timeframe}_position_open'):
+                _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe,
+                                 trade_lock, telegram_config, logger)
+
             housekeeper_routine(exchange, symbol, logger)
             check_and_open_new_position(exchange, model, scaler, params, telegram_config, logger)
     except Exception as e:
         logger.error(f"Fehler im Zyklus: {e}", exc_info=True)
         time.sleep(5)
+
+
+def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, telegram_config, logger):
+    """Erkennt Bitget-SL-Fire und sendet Telegram-Benachrichtigung."""
+    entry_side  = trade_lock.get(f'{symbol_timeframe}_entry_side', '?')
+    entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
+
+    try:
+        ticker     = exchange.fetch_ticker(symbol)
+        exit_price = ticker['last']
+    except Exception:
+        exit_price = None
+
+    pnl = _pnl_str(entry_price, exit_price, entry_side) if (entry_price and exit_price) else "?"
+    logger.warning(f"SL ausgeloest: {entry_side.upper()} {symbol} | PnL ~{pnl}")
+
+    if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
+        price_str = f"{float(exit_price):.8f}" if exit_price else "unbekannt"
+        msg = (
+            f"ZEROBOT (EAR) - SL ausgeloest\n"
+            f"- Symbol: {symbol} ({timeframe})\n"
+            f"- Seite: {entry_side.upper()}\n"
+            f"- SL-Exit: ~{price_str}\n"
+            f"- PnL: ~{pnl}"
+        )
+        send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+
+    trade_lock.pop(f'{symbol_timeframe}_position_open', None)
+    save_trade_lock(trade_lock)
