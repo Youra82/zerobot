@@ -42,6 +42,7 @@ zerobot/
 ├── run_pipeline.sh                # Optimizer (Optuna findet beste Parameter)
 ├── show_results.sh                # Ergebnisse, Backtests, Portfolio-Simulation
 ├── run_analysis.sh                # Renko-spezifische Analysen & Sweeps
+├── show_live_charts.py            # Live Brick-Charts aller Strategien per Telegram anfordern
 ├── auto_optimizer_scheduler.py    # Automatischer Wochentimer: Neu-Optimierung
 ├── run_portfolio_optimizer.py     # Automatische Portfolio-Optimierung
 ├── install.sh                     # Erstinstallation auf VPS
@@ -805,6 +806,26 @@ cd ~/zerobot && .venv/bin/python3 master_runner.py
 ```
 
 Sichert automatisch `secret.json` vor dem `git reset --hard`.
+
+#### Live Brick-Charts per Telegram anfordern
+
+Sendet für alle aktiven Strategien aus `settings.json` einen aktuellen EAR-Brick-Chart direkt als Bild in Telegram. Die Bricks werden mit dem persistierten State berechnet — identisch zu dem was der Live-Bot tatsächlich sieht.
+
+```bash
+# Alle aktiven Strategien aus settings.json
+.venv/bin/python3 show_live_charts.py
+
+# Nur eine bestimmte Strategie
+.venv/bin/python3 show_live_charts.py --symbol BTC/USDT:USDT --timeframe 4h
+
+# Nur ein bestimmtes Timeframe (alle Symbole)
+.venv/bin/python3 show_live_charts.py --timeframe 4h
+```
+
+Jeder Chart enthält:
+- Die letzten 60 EAR-Bricks (grün = up, rot = down)
+- Eine goldene Linie beim Entry-Preis, falls aktuell eine Position offen ist
+- Caption mit Symbol, Timeframe, letztem Brick und Position-Status
 
 #### Auto-Optimizer manuell auslösen
 

@@ -25,6 +25,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.utils.exchange import Exchange
+from zerobot.utils.telegram import send_message
 from zerobot.utils.trade_manager import (
     check_and_close_on_brick_reversal,
     load_or_create_trade_lock,
@@ -54,8 +55,9 @@ def exchange_fixture():
     if bal < 5.0:
         pytest.skip(f"Zu wenig Guthaben ({bal:.2f} USDT) fuer Simulation.")
 
+    tg = secrets.get('telegram', {})
     _cleanup(ex)
-    yield ex
+    yield ex, tg
     _cleanup(ex)
 
 
@@ -95,7 +97,7 @@ def test_sl_placed_and_auto_cancelled(exchange_fixture):
     Hinweis: Bitget erzwingt triggerPrice < markPrice fuer Long-SL (pos_loss).
     Ein sofortiges Feuern durch triggerPrice > markPrice ist nicht moeglich.
     """
-    exchange = exchange_fixture
+    exchange, tg = exchange_fixture
     _cleanup(exchange)
 
     pos_info    = _open_long(exchange)
@@ -106,6 +108,12 @@ def test_sl_placed_and_auto_cancelled(exchange_fixture):
     sl_price = entry_price * 0.97
     print(f"\n  Entry:  {entry_price:.10f}")
     print(f"  SL (-3%): {sl_price:.10f}")
+
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - SL-Simulation\n"
+        f"- Symbol: {SYMBOL}\n"
+        f"- Entry: {entry_price:.8f}\n"
+        f"- SL (-3%): {sl_price:.8f}")
 
     result = exchange.place_sl_trigger_order(SYMBOL, 'sell', contracts, sl_price, 'long')
     assert result and result.get('code') == '00000', \
@@ -142,6 +150,11 @@ def test_sl_placed_and_auto_cancelled(exchange_fixture):
     assert len(trigger_orders) == 0, \
         f"SL-Order sollte nach Position-Close auto-gecancelt sein ({len(trigger_orders)} verbleibend)."
 
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - SL OK\n"
+        f"- planType=pos_loss, posSide=long, tradeSide=close\n"
+        f"- Position geschlossen, SL auto-gecancelt")
+
     print("  Position geschlossen, SL auto-gecancelt. Test bestanden.")
 
 
@@ -153,7 +166,7 @@ def test_tp_brick_reversal_closes_position(exchange_fixture):
     EAREngine._build_bricks wird gemockt: nach Entry-Brick erscheint ein
     DOWN-Brick. check_and_close_on_brick_reversal soll die Position schliessen.
     """
-    exchange = exchange_fixture
+    exchange, tg = exchange_fixture
     _cleanup(exchange)
 
     pos_info    = _open_long(exchange)
@@ -183,8 +196,14 @@ def test_tp_brick_reversal_closes_position(exchange_fixture):
     print(f"\n  Entry: {entry_price:.10f}")
     print(f"  Mock DOWN-Brick @ {entry_price * 1.01:.10f} -> Reversal erkannt")
 
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - TP-Simulation (Brick-Reversal)\n"
+        f"- Symbol: {SYMBOL}\n"
+        f"- Entry: {entry_price:.8f}\n"
+        f"- Mock DOWN-Brick: Reversal wird ausgeloest")
+
     with patch('zerobot.strategy.ear_engine.EAREngine._build_bricks', return_value=mock_bricks):
-        check_and_close_on_brick_reversal(exchange, pos_info, params, {}, logger)
+        check_and_close_on_brick_reversal(exchange, pos_info, params, tg, logger)
 
     time.sleep(3)
 
@@ -193,5 +212,9 @@ def test_tp_brick_reversal_closes_position(exchange_fixture):
         exchange.flash_close_position(SYMBOL)
         time.sleep(3)
         pytest.fail("Position sollte durch Brick-Reversal (TP) geschlossen sein, ist aber noch offen.")
+
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - TP OK\n"
+        f"- Brick-Reversal erkannt, Position geschlossen")
 
     print("  TP via Brick-Reversal — Position erfolgreich geschlossen.")

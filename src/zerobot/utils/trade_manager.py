@@ -14,7 +14,7 @@ import math
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.strategy.ear_logic import get_ear_signal
 from zerobot.utils.exchange import Exchange
-from zerobot.utils.telegram import send_message
+from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.timeframe_utils import determine_htf
 
 PROJECT_ROOT    = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -135,6 +135,114 @@ def _pnl_str(entry_price, exit_price, side):
         return "?"
 
 
+def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
+                        entry_price: float = None, exit_price: float = None,
+                        entry_side: str = None, n_bricks: int = 60) -> str:
+    """
+    Zeichnet die letzten n_bricks EAR-Bricks als Renko-Chart (matplotlib PNG).
+    Bricks kommen direkt aus _build_bricks mit persistiertem State — identisch zum Live-Bot.
+    Gibt den Pfad zur temporaeren PNG-Datei zurueck (muss nach dem Senden geloescht werden).
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+    except ImportError:
+        return None
+
+    if not bricks:
+        return None
+
+    display_bricks = bricks[-n_bricks:]
+    n = len(display_bricks)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#0d1117')
+
+    brick_width = 0.8
+    for i, b in enumerate(display_bricks):
+        is_up  = b['direction'] == 'up'
+        prev_c = display_bricks[i - 1]['close'] if i > 0 else b['close']
+        b_open = prev_c
+        b_close = b['close']
+        color  = '#26a69a' if is_up else '#ef5350'
+        bottom = min(b_open, b_close)
+        height = abs(b_close - b_open)
+        if height == 0:
+            height = abs(b_close) * 1e-5
+        rect = mpatches.FancyBboxPatch(
+            (i - brick_width / 2, bottom), brick_width, height,
+            boxstyle="square,pad=0",
+            linewidth=0.5, edgecolor='#1e2a3a', facecolor=color, zorder=2,
+        )
+        ax.add_patch(rect)
+
+    all_prices = [b['close'] for b in display_bricks]
+    y_min = min(all_prices)
+    y_max = max(all_prices)
+    margin = (y_max - y_min) * 0.15 or y_min * 0.01
+    ax.set_xlim(-1, n)
+    ax.set_ylim(y_min - margin, y_max + margin)
+
+    # Entry-Linie
+    if entry_price is not None:
+        ax.axhline(entry_price, color='#ffd700', linewidth=1.2, linestyle='--', zorder=3,
+                   label=f"Entry {entry_price:.6g}")
+        ax.text(n - 0.5, entry_price, f"  Entry\n  {entry_price:.6g}",
+                color='#ffd700', fontsize=7.5, va='center', ha='left')
+
+    # Exit-Linie (TP oder SL)
+    if exit_price is not None and exit_price != entry_price:
+        is_win = (exit_price > entry_price and entry_side == 'long') or \
+                 (exit_price < entry_price and entry_side == 'short')
+        exit_color = '#26a69a' if is_win else '#ef5350'
+        ax.axhline(exit_price, color=exit_color, linewidth=1.2, linestyle=':', zorder=3,
+                   label=f"Exit {exit_price:.6g}")
+        ax.text(n - 0.5, exit_price, f"  Exit\n  {exit_price:.6g}",
+                color=exit_color, fontsize=7.5, va='center', ha='left')
+
+    side_label = f"{'LONG' if entry_side == 'long' else 'SHORT'} | " if entry_side else ""
+    ax.set_title(f"{symbol}  {timeframe}  |  {side_label}letzte {n} EAR-Bricks",
+                 color='#e0e0e0', fontsize=11, pad=10)
+    ax.tick_params(colors='#888888', labelsize=8)
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#2a3a4a')
+    ax.set_xticks([])
+    ax.yaxis.tick_right()
+    ax.grid(axis='y', color='#1e2a3a', linewidth=0.5, zorder=1)
+
+    if entry_price or exit_price:
+        ax.legend(facecolor='#1a2332', edgecolor='#2a3a4a',
+                  labelcolor='#cccccc', fontsize=8, loc='upper left')
+
+    plt.tight_layout()
+
+    tmp_dir  = os.path.join(PROJECT_ROOT, 'artifacts', 'tmp')
+    os.makedirs(tmp_dir, exist_ok=True)
+    ts       = datetime.now().strftime('%Y%m%d_%H%M%S')
+    sym_safe = symbol.replace('/', '-').replace(':', '-')
+    path     = os.path.join(tmp_dir, f'brick_snapshot_{sym_safe}_{timeframe}_{ts}.png')
+    fig.savefig(path, dpi=130, bbox_inches='tight', facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return path
+
+
+def _send_brick_chart(bricks, symbol, timeframe, entry_price, exit_price,
+                      entry_side, telegram_config, logger):
+    """Generiert PNG und sendet es via Telegram. Loescht Temp-Datei danach."""
+    if not telegram_config or not telegram_config.get('bot_token') or not telegram_config.get('chat_id'):
+        return
+    try:
+        path = _generate_brick_png(bricks, symbol, timeframe, entry_price, exit_price, entry_side)
+        if path and os.path.exists(path):
+            send_photo(telegram_config['bot_token'], telegram_config['chat_id'], path)
+            os.remove(path)
+    except Exception as e:
+        logger.warning(f"Brick-Chart konnte nicht gesendet werden: {e}")
+
+
 def _close_position(exchange, symbol, pos_info, params, telegram_config, logger, reason='brick_reversal'):
     """Schließt eine offene Position per Market Order."""
     try:
@@ -173,6 +281,26 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                     f"- Grund: {reason}"
                 )
                 send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+                # Brick-Chart senden (mit persistiertem State = identisch zum Live-Bot)
+                strat_params = params.get('strategy', {})
+                recent_data  = exchange.fetch_recent_ohlcv(symbol, tf, limit=500)
+                if not recent_data.empty:
+                    atr_ind = ta.volatility.AverageTrueRange(
+                        high=recent_data['high'], low=recent_data['low'],
+                        close=recent_data['close'], window=14)
+                    recent_data['atr'] = atr_ind.average_true_range()
+                    recent_data.dropna(subset=['atr'], inplace=True)
+                    engine      = EAREngine(settings=strat_params)
+                    brick_state = load_brick_state(symbol_timeframe)
+                    bricks      = engine._build_bricks(
+                        recent_data,
+                        init_lc=brick_state.get('lc'),
+                        init_direction=brick_state.get('direction'),
+                    )
+                    _send_brick_chart(bricks, symbol, tf,
+                                      float(entry_price) if entry_price else None,
+                                      float(exit_price), pos_side,
+                                      telegram_config, logger)
             except Exception:
                 pass
     except Exception as e:
@@ -396,6 +524,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         trade_lock[f"{symbol_timeframe}_position_open"]     = True
         save_trade_lock(trade_lock)
 
+        entry_side_str = 'long' if signal_side == 'buy' else 'short'
         if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
             msg = (
                 f"ZEROBOT (EAR) - Trade eroeffnet\n"
@@ -406,6 +535,10 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
                 f"- TP: erster Gegenbrick (dynamisch)"
             )
             send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+            # Brick-Chart senden — bricks bereits berechnet (mit persistiertem State)
+            _send_brick_chart(bricks, symbol, timeframe,
+                              float(entry_price), None, entry_side_str,
+                              telegram_config, logger)
 
         logger.info("Trade-Eröffnung erfolgreich. TP via Brick-Reversal-Check.")
 

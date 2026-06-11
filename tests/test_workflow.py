@@ -15,6 +15,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.utils.exchange import Exchange
+from zerobot.utils.telegram import send_message
 from zerobot.utils.trade_manager import check_and_open_new_position, housekeeper_routine
 from zerobot.utils.trade_manager import set_trade_lock, save_trade_lock, is_trade_locked, load_or_create_trade_lock
 
@@ -118,6 +119,12 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     if not entry_order:
         pytest.fail("Entry-Order fehlgeschlagen.")
 
+    send_message(telegram_config.get('bot_token', ''), telegram_config.get('chat_id', ''),
+        f"ZEROBOT Test - Trade eroeffnet\n"
+        f"- Symbol: {symbol}\n"
+        f"- Seite: LONG\n"
+        f"- Notional: ~{notional} USDT @ {market_price:.8f}")
+
     print("-> Warte 3s auf Ausführung...")
     time.sleep(3)
 
@@ -142,6 +149,11 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     sl_result = exchange.place_sl_trigger_order(symbol, 'sell', contracts, sl_price, 'long')
     if not sl_result:
         print("WARNUNG: place_sl_trigger_order hat None zurückgegeben.")
+
+    send_message(telegram_config.get('bot_token', ''), telegram_config.get('chat_id', ''),
+        f"ZEROBOT Test - SL platziert\n"
+        f"- planType=pos_loss, posSide=long\n"
+        f"- SL @ {sl_price:.8f} (-3%)")
     time.sleep(2)
 
     trigger_orders = exchange.fetch_open_trigger_orders(symbol)
@@ -178,5 +190,10 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
 
     assert len(final_positions) == 0, "Position sollte geschlossen sein."
     assert len(final_orders)    == 0, f"Trigger-Orders nicht gelöscht ({len(final_orders)} verbleibend)."
+
+    send_message(telegram_config.get('bot_token', ''), telegram_config.get('chat_id', ''),
+        f"ZEROBOT Test - Trade geschlossen\n"
+        f"- Symbol: {symbol}\n"
+        f"- Position und SL-Order sauber gecancelt")
 
     print("\n--- WORKFLOW-TEST ERFOLGREICH! ---")
