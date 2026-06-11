@@ -36,7 +36,7 @@ class Exchange:
             'password': self.account.get('password'),
             'options':  {
                 'defaultType': 'swap',
-                'hedged': False,  # One-Way-Modus (kein holdSide in Orders)
+                'hedged': True,
             },
             'enableRateLimit': True,
         })
@@ -111,7 +111,8 @@ class Exchange:
         if not self.markets:
             return False
         try:
-            self.exchange.set_margin_mode(mode, symbol)
+            params = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'}
+            self.exchange.set_margin_mode(mode, symbol, params=params)
             return True
         except Exception as e:
             if 'Margin mode is the same' in str(e):
@@ -122,8 +123,11 @@ class Exchange:
     def set_leverage(self, symbol, level=10):
         if not self.markets:
             return False
+        params = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'}
         try:
-            self.exchange.set_leverage(level, symbol)
+            for hold_side in ('long', 'short'):
+                self.exchange.set_leverage(level, symbol, params={**params, 'holdSide': hold_side})
+                time.sleep(0.2)
             return True
         except Exception as e:
             if 'Leverage not changed' in str(e):
@@ -142,9 +146,8 @@ class Exchange:
             for k in ('instId', 'symbol'):
                 if k in clean_params:
                     del clean_params[k]
-            # Bitget v2 one-way mode: tradeSide steuert open/close.
-            # reduceOnly NICHT an CCXT übergeben: CCXT würde reduceOnly='YES' + marginMode='crossed'
-            # setzen → Bitget 22002 ("No position to close") bei isolated Positionen.
+            # tradeSide explizit setzen — CCXT's hedged=True würde sonst 'Open' setzen,
+            # aber unser explizites 'open'/'close' in params überschreibt via extend().
             if clean_params.pop('reduceOnly', False):
                 clean_params['tradeSide'] = 'close'
                 clean_params.setdefault('marginMode', 'isolated')
@@ -177,7 +180,7 @@ class Exchange:
             return None
 
     def place_sl_trigger_order(self, symbol, side, amount, trigger_price, hold_side):
-        """SL-Plan-Order direkt via Bitget v2 API — umgeht CCXT holdSide-Problem bei Hedge-Mode.
+        """SL via Bitget place-tpsl-order Endpoint — unterstützt holdSide nativ.
         hold_side: 'long' (Long-SL, side='sell') oder 'short' (Short-SL, side='buy')"""
         if not self.markets:
             return None
@@ -190,17 +193,13 @@ class Exchange:
                 'productType':  'USDT-FUTURES',
                 'marginMode':   'isolated',
                 'marginCoin':   'USDT',
-                'size':         str(rounded_amount),
-                'side':         side,
-                'tradeSide':    'close',
-                'orderType':    'market',
-                'triggerType':  'mark_price',
+                'planType':     'pos_loss',
                 'triggerPrice': str(rounded_price),
-                'planType':     'normal_plan',
                 'holdSide':     hold_side,
+                'triggerType':  'mark_price',
             }
             logger.info(f"SL Trigger Order ({hold_side}): {side} {rounded_amount} @ {rounded_price}")
-            response = self.exchange.privateMixPostV2MixOrderPlacePlanOrder(request)
+            response = self.exchange.privateMixPostV2MixOrderPlaceTpslOrder(request)
             logger.info(f"SL Trigger Order platziert: {response}")
             return response
         except Exception as e:
@@ -241,12 +240,33 @@ class Exchange:
     def fetch_open_trigger_orders(self, symbol):
         if not self.markets:
             return []
+        orders = []
+        market = self.exchange.market(symbol)
         try:
+            # Normale Plan-Orders (normal_plan, loss_plan, ...)
             params = {'productType': 'USDT-FUTURES', 'stop': True}
-            return self.exchange.fetch_open_orders(symbol, params=params)
+            orders += self.exchange.fetch_open_orders(symbol, params=params)
         except Exception as e:
-            logger.error(f"Fehler bei Trigger Orders: {e}")
-            return []
+            logger.error(f"Fehler bei Plan-Trigger-Orders: {e}")
+        try:
+            # TPSL-Orders (pos_loss, pos_profit via place-tpsl-order)
+            # CCXT kann diese nicht via isPlan='profit_loss' abrufen → direkter API-Call
+            resp = self.exchange.privateMixGetV2MixOrderOrdersPlanPending({
+                'symbol':      market['id'],
+                'productType': 'USDT-FUTURES',
+                'planType':    'profit_loss',
+            })
+            raw_list = (resp.get('data') or {}).get('entrustedList', [])
+            for raw in raw_list:
+                orders.append({
+                    'id':           raw.get('orderId'),
+                    'side':         raw.get('side'),
+                    'triggerPrice': raw.get('triggerPrice'),
+                    'info':         raw,
+                })
+        except Exception as e:
+            logger.error(f"Fehler bei TPSL-Orders: {e}")
+        return orders
 
     def fetch_balance_usdt(self):
         if not self.markets:
@@ -284,12 +304,22 @@ class Exchange:
             open_triggers = self.fetch_open_trigger_orders(symbol)
             for order in open_triggers:
                 try:
-                    self.exchange.cancel_order(order['id'], symbol,
-                                               params={'productType': 'USDT-FUTURES', 'stop': True})
+                    order_id = order['id']
+                    raw_plan_type = order.get('info', {}).get('planType', '')
+                    if raw_plan_type in ('pos_loss', 'pos_profit'):
+                        market_info = self.exchange.market(symbol)
+                        self.exchange.privateMixPostV2MixOrderCancelPlanOrder({
+                            'orderId':     order_id,
+                            'symbol':      market_info['id'],
+                            'productType': 'USDT-FUTURES',
+                        })
+                    else:
+                        self.exchange.cancel_order(order_id, symbol,
+                                                   params={'productType': 'USDT-FUTURES', 'stop': True})
                     count += 1
                     time.sleep(0.1)
                 except Exception as e:
-                    logger.warning(f"Konnte Einzel-Order {order['id']} nicht löschen: {e}")
+                    logger.warning(f"Konnte Einzel-Order {order_id} nicht löschen: {e}")
         except Exception as e:
             logger.error(f"Fehler beim Abrufen/Löschen der Rest-Orders: {e}")
         return count

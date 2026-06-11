@@ -7,6 +7,10 @@ import logging
 import time
 from unittest.mock import patch
 
+# Zeige alle INFO-Logs aus dem Exchange-Modul im Test-Output
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format='[%(name)s] %(message)s')
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
@@ -100,41 +104,58 @@ def test_full_zerobot_workflow_on_bitget(test_setup):
     if bal < 5.0:
         pytest.skip(f"Zu wenig Guthaben ({bal:.2f} USDT < 5 USDT) für Live-Test.")
 
-    # Fixer Testwert (wie dnabot: simulated_balance=50) — unabhängig vom echten Kontostand.
-    # Mit risk=0.1% und sl≈0.6%: notional = 50*0.001/0.006 ≈ 8 USDT (knapp über Mindest-Notional).
-    SIMULATED_BALANCE = 50.0
+    # --- Schritt 1: Direkter Entry (kein EAR-Mock) ---
+    # So vermeiden wir stale Brick-Level die über dem echten Marktpreis liegen.
+    print(f"\n[Schritt 1/3] Öffne LONG direkt (no EAR) @ Marktpreis...")
+    exchange.set_margin_mode(symbol, 'isolated')
+    exchange.set_leverage(symbol, 20)
 
-    with patch('zerobot.utils.trade_manager.set_trade_lock'), \
-         patch('zerobot.utils.trade_manager.save_trade_lock'), \
-         patch('zerobot.utils.trade_manager.is_trade_locked', return_value=False), \
-         patch('zerobot.utils.trade_manager.load_or_create_trade_lock', return_value={}), \
-         patch.object(exchange, 'fetch_balance_usdt', return_value=SIMULATED_BALANCE), \
-         patch('zerobot.utils.trade_manager.get_ear_signal', return_value=('buy', None)):
+    ticker       = exchange.fetch_ticker(symbol)
+    market_price = ticker['last']
+    notional     = 8.0
+    raw_amount   = notional / market_price
+    entry_order  = exchange.create_market_order(symbol, 'buy', raw_amount, {'tradeSide': 'open'})
+    if not entry_order:
+        pytest.fail("Entry-Order fehlgeschlagen.")
 
-        print(f"\n[Schritt 1/3] Simuliere Buy-Signal (EAR gemockt, Balance={SIMULATED_BALANCE} USDT)...")
-        check_and_open_new_position(exchange, None, None, params, telegram_config, logger)
+    print("-> Warte 3s auf Ausführung...")
+    time.sleep(3)
 
-    print("-> Warte 5s auf Order-Ausführung...")
-    time.sleep(5)
-
-    print("\n[Schritt 2/3] Überprüfe Position und Orders...")
+    # --- Schritt 2: Position + SL prüfen ---
+    print("\n[Schritt 2/3] Überprüfe Position und SL-Order...")
     position = exchange.fetch_open_positions(symbol)
-
     if not position:
-        pytest.fail(f"Position nicht eröffnet (sim. Balance={SIMULATED_BALANCE} USDT, echtes Guthaben={bal:.2f} USDT).")
+        pytest.fail("Position nicht eröffnet.")
 
     assert len(position) == 1
-    pos_info = position[0]
-    print(f"-> Position eröffnet: {pos_info['side'].upper()} {pos_info['contracts']} PEPE "
-          f"(hedged={pos_info.get('hedged')}, marginMode={pos_info.get('marginMode')}).")
+    pos_info     = position[0]
+    actual_entry = float(pos_info.get('entryPrice', market_price))
+    mark_price   = float(pos_info.get('markPrice',  actual_entry))
+    contracts    = float(pos_info['contracts'])
+    print(f"-> Position: {pos_info['side'].upper()} {contracts} PEPE "
+          f"(hedged={pos_info.get('hedged')}, marginMode={pos_info.get('marginMode')})")
+    print(f"   entryPrice={actual_entry:.10f}  markPrice={mark_price:.10f}")
+
+    # SL 3% unter echtem Entry → garantiert unter Marktpreis, feuert nicht sofort
+    sl_price = actual_entry * 0.97
+    print(f"   Platziere SL (pos_loss / place-tpsl-order) @ {sl_price:.10f} (-3% von entry)...")
+    sl_result = exchange.place_sl_trigger_order(symbol, 'sell', contracts, sl_price, 'long')
+    if not sl_result:
+        print("WARNUNG: place_sl_trigger_order hat None zurückgegeben.")
+    time.sleep(2)
 
     trigger_orders = exchange.fetch_open_trigger_orders(symbol)
     if len(trigger_orders) == 0:
-        print("WARNUNG: Keine Trigger-Orders (EAR-SL möglicherweise bereits gefeuert).")
+        print("WARNUNG: Keine Trigger-Orders gefunden.")
     else:
-        print(f"-> Trigger-Orders gefunden: {len(trigger_orders)}")
+        print(f"-> SL-Order sichtbar: {len(trigger_orders)} Trigger-Order(s)")
+        for o in trigger_orders:
+            raw = o.get('info', {})
+            print(f"   side={o.get('side')}  triggerPrice={o.get('triggerPrice')}  "
+                  f"planType={raw.get('planType')}  posSide={raw.get('posSide')}  "
+                  f"tradeSide={raw.get('tradeSide')}")
 
-    # Flash-Close: Bitget /api/v2/mix/order/close-positions — umgeht hedge/one-way Probleme
+    # --- Schritt 3: Schließen ---
     print("\n[Schritt 3/3] Schließe Position (Flash-Close)...")
     exchange.cancel_all_orders_for_symbol(symbol)
     close_result = exchange.flash_close_position(symbol)
