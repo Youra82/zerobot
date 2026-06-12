@@ -57,6 +57,7 @@
         },
         "start_capital": 100,
         "start_date": "2024-01-01",
+        "_start_date_note": "Daten-Ladestart fuer Warmup (ATR, Bricks) — NICHT der Bewertungszeitraum. Kein Widerspruch zu backtest_lookback_weeks.",
         "end_date": "auto",
         "constraints": {
             "max_drawdown_pct": 30
