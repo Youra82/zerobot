@@ -799,6 +799,16 @@ cd ~/zerobot && .venv/bin/python3 master_runner.py
 ./run_tests.sh
 ```
 
+#### Configs und Settings auf Repo pushen
+
+Nach der Pipeline oder nach manuellen Änderungen an `settings.json`:
+
+```bash
+./push_configs.sh
+```
+
+Zeigt alle gefundenen Configs (mit OOS-PnL und Hebel) sowie aktive Strategien an, staged `src/zerobot/strategy/configs/` und `settings.json`, und pusht auf `main`. Bei Konflikten wird automatisch ein Rebase durchgeführt.
+
 #### Bot aktualisieren
 
 ```bash
