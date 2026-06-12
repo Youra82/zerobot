@@ -1,0 +1,31 @@
+{
+    "market": {
+        "symbol": "BNB/USDT:USDT",
+        "timeframe": "1h",
+        "htf": "4h"
+    },
+    "strategy": {
+        "base_pct": 0.0033,
+        "k_entropy": 0.841,
+        "h_window": 11,
+        "trend_min_bricks": 3
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 2.22,
+        "leverage": 16
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 2167136.8,
+        "optimized_at": "2026-06-11T17:19:08",
+        "train_start": "2023-03-01",
+        "train_end": "2026-02-28",
+        "oos_start": "2026-03-01",
+        "oos_end": "2026-06-11",
+        "oos_pnl_pct": 94.98
+    }
+}

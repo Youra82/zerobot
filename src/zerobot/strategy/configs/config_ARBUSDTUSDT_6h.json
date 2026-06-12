@@ -1,0 +1,31 @@
+{
+    "market": {
+        "symbol": "ARB/USDT:USDT",
+        "timeframe": "6h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0069,
+        "k_entropy": 0.701,
+        "h_window": 19,
+        "trend_min_bricks": 2
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 1.78,
+        "leverage": 14
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 6926788.33,
+        "optimized_at": "2026-06-11T21:39:03",
+        "train_start": "2023-03-01",
+        "train_end": "2026-02-28",
+        "oos_start": "2026-03-01",
+        "oos_end": "2026-06-11",
+        "oos_pnl_pct": 87.04
+    }
+}

@@ -1,0 +1,31 @@
+{
+    "market": {
+        "symbol": "ETH/USDT:USDT",
+        "timeframe": "2h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0029,
+        "k_entropy": 1.121,
+        "h_window": 11,
+        "trend_min_bricks": 3
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 1.66,
+        "leverage": 7
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 130217.21,
+        "optimized_at": "2026-06-11T15:04:29",
+        "train_start": "2023-03-01",
+        "train_end": "2026-02-28",
+        "oos_start": "2026-03-01",
+        "oos_end": "2026-06-11",
+        "oos_pnl_pct": 170.48
+    }
+}

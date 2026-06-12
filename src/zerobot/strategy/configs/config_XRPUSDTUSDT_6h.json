@@ -1,0 +1,31 @@
+{
+    "market": {
+        "symbol": "XRP/USDT:USDT",
+        "timeframe": "6h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0058,
+        "k_entropy": 0.61,
+        "h_window": 5,
+        "trend_min_bricks": 3
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 1.85,
+        "leverage": 18
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 814283.75,
+        "optimized_at": "2026-06-11T17:36:11",
+        "train_start": "2023-03-01",
+        "train_end": "2026-02-28",
+        "oos_start": "2026-03-01",
+        "oos_end": "2026-06-11",
+        "oos_pnl_pct": -6.76
+    }
+}

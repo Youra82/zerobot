@@ -1,0 +1,31 @@
+{
+    "market": {
+        "symbol": "DOGE/USDT:USDT",
+        "timeframe": "6h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.005,
+        "k_entropy": 0.618,
+        "h_window": 18,
+        "trend_min_bricks": 2
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 1.48,
+        "leverage": 18
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 98974533.0,
+        "optimized_at": "2026-06-12T00:42:06",
+        "train_start": "2023-03-01",
+        "train_end": "2026-02-28",
+        "oos_start": "2026-03-01",
+        "oos_end": "2026-06-11",
+        "oos_pnl_pct": 40.81
+    }
+}
