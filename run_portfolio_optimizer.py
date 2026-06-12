@@ -478,10 +478,21 @@ def main() -> int:
     # OOS-Daten automatisch laden
     oos_start, warmup_start, oos_map = _load_oos_info()
 
-    # Daten ab Warmup laden (EAR-Brick-State), Trades erst ab OOS-Start
-    data_start     = warmup_start or args.start_date or (
+    # data_start: ab wann OHLCV laden (EAR-Brick-Warmup) — immer voller Zeitraum
+    data_start = warmup_start or args.start_date or (
         date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
-    trade_start    = oos_start  # None wenn kein OOS-File vorhanden
+
+    # trade_start: ab wann Trades gezählt werden (OOS-Grenze)
+    # backtest_lookback_weeks begrenzt zusätzlich auf die letzten N Wochen,
+    # damit der Portfolio-Optimizer nur aktuelle Performance bewertet.
+    trade_start = oos_start
+    lookback_weeks = opt.get('backtest_lookback_weeks')
+    if lookback_weeks:
+        lookback_start = (date.today() - timedelta(weeks=int(lookback_weeks))).strftime('%Y-%m-%d')
+        if trade_start:
+            trade_start = max(trade_start, lookback_start)
+        else:
+            trade_start = lookback_start
 
     print(f"\n{'─'*72}")
     print(f"{B}  ZeroBot — Portfolio-Optimizer (EAR){NC}")
@@ -489,10 +500,15 @@ def main() -> int:
     if oos_start:
         print(f"  {Y}OOS-Periode:  {oos_start} → {end_date}  (DUNKLER BEREICH){NC}")
         print(f"  Warmup:       {data_start} → {oos_start}  (EAR Brick-Aufbau, keine Trades)")
+        if lookback_weeks and trade_start != oos_start:
+            print(f"  {Y}Lookback:     letzte {lookback_weeks} Wochen ({trade_start} → {end_date}){NC}")
         print(f"  OOS-Filter:   Nur Strategien mit positivem OOS-PnL werden zugelassen")
     else:
         print(f"  {Y}Kein last_oos_run.json gefunden — nutze Zeitraum ohne OOS-Filter{NC}")
-        print(f"  Zeitraum: {data_start} → {end_date}")
+        if lookback_weeks and trade_start:
+            print(f"  {Y}Lookback:     letzte {lookback_weeks} Wochen ({trade_start} → {end_date}){NC}")
+        else:
+            print(f"  Zeitraum: {data_start} → {end_date}")
     print(f"{'─'*72}\n")
 
     config_files = _scan_configs()

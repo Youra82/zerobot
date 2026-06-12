@@ -32,6 +32,8 @@
     },
     "optimization_settings": {
         "enabled": true,
+        "backtest_lookback_weeks": 4,
+        "_backtest_lookback_note": "Wie viele Wochen zurueck der Auto-Optimizer schaut. Optimal per run_analysis.sh (Option 1 Walk-Forward) ermitteln.",
         "schedule": {
             "_info": "day_of_week: 0=Montag, 6=Sonntag | hour: 0-23 (24h Format)",
             "day_of_week": 6,
