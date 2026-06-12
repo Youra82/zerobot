@@ -4,12 +4,12 @@
         "use_auto_optimizer_results": false,
         "active_strategies": [
             {
-                "symbol": "DOGE/USDT:USDT",
+                "symbol": "BTC/USDT:USDT",
                 "timeframe": "4h",
                 "active": true
             },
             {
-                "symbol": "BTC/USDT:USDT",
+                "symbol": "DOGE/USDT:USDT",
                 "timeframe": "4h",
                 "active": true
             },
@@ -22,11 +22,6 @@
                 "symbol": "SOL/USDT:USDT",
                 "timeframe": "4h",
                 "active": true
-            },
-            {
-                "symbol": "XRP/USDT:USDT",
-                "timeframe": "4h",
-                "active": false
             }
         ]
     },
