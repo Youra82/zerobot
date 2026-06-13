@@ -315,12 +315,7 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                     recent_data['atr'] = atr_ind.average_true_range()
                     recent_data.dropna(subset=['atr'], inplace=True)
                     engine      = EAREngine(settings=strat_params)
-                    brick_state = load_brick_state(symbol_timeframe)
-                    bricks      = engine._build_bricks(
-                        recent_data,
-                        init_lc=brick_state.get('lc'),
-                        init_direction=brick_state.get('direction'),
-                    )
+                    bricks = engine._build_bricks(recent_data)
                     _send_brick_chart(bricks, symbol, tf,
                                       float(entry_price) if entry_price else None,
                                       float(exit_price), pos_side,
@@ -355,16 +350,10 @@ def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_confi
         recent_data.dropna(subset=['atr'], inplace=True)
 
         engine = EAREngine(settings=strat_params)
-        brick_state = load_brick_state(symbol_timeframe)
-        bricks = engine._build_bricks(
-            recent_data,
-            init_lc=brick_state.get('lc'),
-            init_direction=brick_state.get('direction'),
-        )
+        bricks = engine._build_bricks(recent_data)
         if not bricks:
             logger.info("Keine Bricks berechnet – Position hält.")
             return
-        save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
 
         # Brick-Zähler beim Entry aus trade_lock lesen (wie Backtester: Bricks nach Entry-Brick-Index)
         trade_lock        = load_or_create_trade_lock()
@@ -422,26 +411,15 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         recent_data['atr'] = atr_indicator.average_true_range()
         recent_data.dropna(subset=['atr'], inplace=True)
 
-        # EAR Engine — mit persistiertem Brick-State (pfadunabhaengig)
-        engine      = EAREngine(settings=strat_params)
-        brick_state = load_brick_state(symbol_timeframe)
-        init_lc     = brick_state.get('lc')
-        init_dir    = brick_state.get('direction')
-        save_chart_state(symbol_timeframe, init_lc, init_dir)  # snapshot fuer show_live_charts
+        # EAR Engine — immer ab Kerze 0 der 1000 Kerzen, kein init_lc (keine Phantom-Bricks)
+        engine = EAREngine(settings=strat_params)
 
-        processed_data = engine.process_dataframe(
-            recent_data, init_lc=init_lc, init_direction=init_dir)
+        processed_data = engine.process_dataframe(recent_data)
         current_candle = processed_data.iloc[-1]
 
         signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, Bias.NEUTRAL)
 
         if not signal_side:
-            # State nach jedem Lauf speichern (auch wenn kein Signal)
-            raw_bricks = engine._build_bricks(
-                recent_data, init_lc=init_lc, init_direction=init_dir)
-            if raw_bricks:
-                save_brick_state(symbol_timeframe,
-                                 raw_bricks[-1]['close'], raw_bricks[-1]['direction'])
             logger.info("Kein EAR-Signal – überspringe.")
             return
 
@@ -479,9 +457,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
 
         # Entry = letzter Brick-Close (wie im Backtester: bricks[bidx]['close'])
         # SL    = vorheriger Brick-Close (wie im Backtester: bricks[bidx-1]['close'])
-        bricks = engine._build_bricks(recent_data, init_lc=init_lc, init_direction=init_dir)
-        if bricks:
-            save_brick_state(symbol_timeframe, bricks[-1]['close'], bricks[-1]['direction'])
+        bricks = engine._build_bricks(recent_data)
         if bricks and len(bricks) > 1:
             entry_price = bricks[-1]['close']   # letzter Brick-Level (= Backtester-Entry)
             sl_price    = bricks[-2]['close']   # vorheriger Brick-Level (= Backtester-SL)
