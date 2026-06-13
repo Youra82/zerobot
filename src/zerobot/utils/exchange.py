@@ -256,7 +256,7 @@ class Exchange:
                 'productType': 'USDT-FUTURES',
                 'planType':    'profit_loss',
             })
-            raw_list = (resp.get('data') or {}).get('entrustedList', [])
+            raw_list = (resp.get('data') or {}).get('entrustedList') or []
             for raw in raw_list:
                 orders.append({
                     'id':           raw.get('orderId'),
