@@ -161,7 +161,8 @@ def _pnl_str(entry_price, exit_price, side):
 
 def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
                         entry_price: float = None, exit_price: float = None,
-                        entry_side: str = None, n_bricks: int = 60) -> str:
+                        entry_side: str = None, sl_price: float = None,
+                        n_bricks: int = 60) -> str:
     """
     Zeichnet die letzten n_bricks EAR-Bricks als Renko-Chart (matplotlib PNG).
     Bricks kommen direkt aus _build_bricks mit persistiertem State — identisch zum Live-Bot.
@@ -217,6 +218,12 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
         ax.text(n - 0.5, entry_price, f"  Entry\n  {entry_price:.6g}",
                 color='#ffd700', fontsize=7.5, va='center', ha='left')
 
+    # SL-Linie
+    if sl_price is not None:
+        ax.axhline(sl_price, color='#ff4444', linewidth=1.0, linestyle='--', zorder=3)
+        ax.text(n - 0.5, sl_price, f"  SL\n  {sl_price:.6g}",
+                color='#ff4444', fontsize=7.5, va='center', ha='left')
+
     # Exit-Linie (TP oder SL)
     if exit_price is not None and exit_price != entry_price:
         is_win = (exit_price > entry_price and entry_side == 'long') or \
@@ -254,12 +261,13 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
 
 
 def _send_brick_chart(bricks, symbol, timeframe, entry_price, exit_price,
-                      entry_side, telegram_config, logger):
+                      entry_side, telegram_config, logger, sl_price=None):
     """Generiert PNG und sendet es via Telegram. Loescht Temp-Datei danach."""
     if not telegram_config or not telegram_config.get('bot_token') or not telegram_config.get('chat_id'):
         return
     try:
-        path = _generate_brick_png(bricks, symbol, timeframe, entry_price, exit_price, entry_side)
+        path = _generate_brick_png(bricks, symbol, timeframe, entry_price, exit_price,
+                                   entry_side, sl_price=sl_price)
         if path and os.path.exists(path):
             send_photo(telegram_config['bot_token'], telegram_config['chat_id'], path)
             os.remove(path)
@@ -539,7 +547,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             # Brick-Chart senden — bricks bereits berechnet (mit persistiertem State)
             _send_brick_chart(bricks, symbol, timeframe,
                               float(entry_price), None, entry_side_str,
-                              telegram_config, logger)
+                              telegram_config, logger, sl_price=float(sl_price))
 
         logger.info("Trade-Eröffnung erfolgreich. TP via Brick-Reversal-Check.")
 
