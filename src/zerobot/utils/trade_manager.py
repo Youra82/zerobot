@@ -283,7 +283,7 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                 send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
                 # Brick-Chart senden (mit persistiertem State = identisch zum Live-Bot)
                 strat_params = params.get('strategy', {})
-                recent_data  = exchange.fetch_recent_ohlcv(symbol, tf, limit=500)
+                recent_data  = exchange.fetch_recent_ohlcv(symbol, tf, limit=1000)
                 if not recent_data.empty:
                     atr_ind = ta.volatility.AverageTrueRange(
                         high=recent_data['high'], low=recent_data['low'],
@@ -318,7 +318,7 @@ def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_confi
     pos_side        = pos_info.get('side', '').lower()  # 'long' or 'short'
 
     try:
-        recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=500)
+        recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
         if recent_data.empty or len(recent_data) < 20:
             logger.warning("Nicht genug Daten für Brick-Reversal-Check.")
             return

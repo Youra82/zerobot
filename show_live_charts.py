@@ -91,7 +91,7 @@ def generate_and_send_chart(exchange: Exchange, symbol: str, timeframe: str,
     entry_price, entry_side = _open_position_info(symbol, timeframe, trade_lock)
 
     print(f"  Lade OHLCV {symbol} ({timeframe})...")
-    recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=500)
+    recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
     if recent_data.empty or len(recent_data) < 20:
         print(f"  WARNUNG: Nicht genug Daten fuer {symbol} ({timeframe}).")
         return False
