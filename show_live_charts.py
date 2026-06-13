@@ -27,6 +27,7 @@ from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.trade_manager import (
     _generate_brick_png,
+    load_chart_state,
     load_or_create_trade_lock,
 )
 
@@ -101,9 +102,14 @@ def generate_and_send_chart(exchange: Exchange, symbol: str, timeframe: str,
     recent_data['atr'] = atr_ind.average_true_range()
     recent_data.dropna(subset=['atr'], inplace=True)
 
-    # Bricks ohne gespeicherten State — reproduzierbar aus denselben 1000 Kerzen
-    engine = EAREngine(settings=strat_params)
-    bricks = engine._build_bricks(recent_data)
+    # Exakt derselbe init_lc wie beim letzten Bot-Lauf → identische Bricks
+    engine      = EAREngine(settings=strat_params)
+    chart_state = load_chart_state(symbol_timeframe)
+    bricks      = engine._build_bricks(
+        recent_data,
+        init_lc=chart_state.get('lc'),
+        init_direction=chart_state.get('direction'),
+    )
 
     if not bricks:
         print(f"  WARNUNG: Keine Bricks fuer {symbol} ({timeframe}).")

@@ -47,6 +47,30 @@ def save_brick_state(symbol_timeframe: str, lc: float, direction: str):
         json.dump({'lc': lc, 'direction': direction}, f)
 
 
+def _chart_state_path(symbol_timeframe: str) -> str:
+    safe = symbol_timeframe.replace('/', '-').replace(':', '-')
+    return os.path.join(DB_PATH, f'ear_chart_state_{safe}.json')
+
+
+def load_chart_state(symbol_timeframe: str) -> dict:
+    """Laedt den init_lc/direction, der beim letzten Bot-Lauf verwendet wurde."""
+    path = _chart_state_path(symbol_timeframe)
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_chart_state(symbol_timeframe: str, lc, direction):
+    """Speichert den init_lc/direction VOR dem Brick-Build — fuer show_live_charts."""
+    os.makedirs(DB_PATH, exist_ok=True)
+    with open(_chart_state_path(symbol_timeframe), 'w') as f:
+        json.dump({'lc': lc, 'direction': direction}, f)
+
+
 class Bias:
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
@@ -403,6 +427,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         brick_state = load_brick_state(symbol_timeframe)
         init_lc     = brick_state.get('lc')
         init_dir    = brick_state.get('direction')
+        save_chart_state(symbol_timeframe, init_lc, init_dir)  # snapshot fuer show_live_charts
 
         processed_data = engine.process_dataframe(
             recent_data, init_lc=init_lc, init_direction=init_dir)
