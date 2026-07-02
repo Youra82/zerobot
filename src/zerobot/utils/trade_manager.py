@@ -336,49 +336,51 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
 
 def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_config, logger):
     """
-    Prüft ob ein EAR-Brick in Gegenrichtung entstanden ist (seit Trade-Eröffnung).
+    Prüft ob seit Trade-Eröffnung ein EAR-Brick in Gegenrichtung entstanden ist.
     Falls ja → Position per Market Order schließen (Brick-TP-Exit).
+
+    Bricks werden ab dem exakten Entry-Anker (init_lc=Entry-Preis, init_direction=
+    Entry-Richtung) über die Kerzen SEIT Entry-Zeitpunkt neu aufgebaut. Ein rollierendes
+    Fenster (z.B. limit=1000 ab "jetzt") ist hier bewusst NICHT geeignet: _build_bricks ist
+    pfadabhängig vom ersten Kerzen-Close im Fenster, und dieser Anfang verschiebt sich bei
+    jedem Aufruf mit dem Fenster mit – dadurch faltet sich die komplette Brick-Kette bei
+    jedem Check anders (verifiziert an Live-Daten: bereits 5 Kerzen Versatz kehren die
+    Richtung des jüngsten Bricks um). Ab einem festen Anker (Entry) bleibt die Kette dagegen
+    über alle Checks hinweg identisch – neue Kerzen hängen sich nur an, nichts faltet neu.
     """
-    symbol          = params['market']['symbol']
-    timeframe       = params['market']['timeframe']
-    symbol_timeframe = f"{symbol.replace('/', '-')}_{timeframe}"
-    pos_side        = pos_info.get('side', '').lower()  # 'long' or 'short'
+    symbol            = params['market']['symbol']
+    timeframe         = params['market']['timeframe']
+    symbol_timeframe  = f"{symbol.replace('/', '-')}_{timeframe}"
+    pos_side          = pos_info.get('side', '').lower()  # 'long' or 'short'
+
+    trade_lock     = load_or_create_trade_lock()
+    entry_price    = trade_lock.get(f"{symbol_timeframe}_last_entry_price")
+    entry_time_str = trade_lock.get(f"{symbol_timeframe}_entry_time")
+    entry_side     = trade_lock.get(f"{symbol_timeframe}_entry_side")  # 'long' / 'short'
+
+    if entry_price is None or entry_time_str is None or entry_side is None:
+        logger.warning("Kein Entry-Anker (Preis/Zeit/Seite) im trade_lock – Reversal-Check übersprungen.")
+        return
 
     try:
-        recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
-        if recent_data.empty or len(recent_data) < 20:
-            logger.warning("Nicht genug Daten für Brick-Reversal-Check.")
+        entry_dt = datetime.fromisoformat(entry_time_str)
+        since_ms = int(entry_dt.timestamp() * 1000)
+
+        recent_data = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
+        if recent_data.empty:
+            logger.info("Noch keine neuen Kerzen seit Entry – Position hält.")
             return
 
-        strat_params  = params.get('strategy', {})
-        atr_indicator = ta.volatility.AverageTrueRange(
-            high=recent_data['high'], low=recent_data['low'],
-            close=recent_data['close'], window=14)
-        recent_data['atr'] = atr_indicator.average_true_range()
-        recent_data.dropna(subset=['atr'], inplace=True)
+        strat_params   = params.get('strategy', {})
+        engine         = EAREngine(settings=strat_params)
+        init_direction = 'up' if entry_side == 'long' else 'down'
+        bricks = engine._build_bricks(recent_data, init_lc=float(entry_price), init_direction=init_direction)
 
-        engine = EAREngine(settings=strat_params)
-        bricks = engine._build_bricks(recent_data)
         if not bricks:
-            logger.info("Keine Bricks berechnet – Position hält.")
+            logger.info(f"Kein Gegenbrick seit Entry ({entry_time_str}) – Position hält ({pos_side}).")
             return
 
-        # Brick-Zähler beim Entry aus trade_lock lesen (wie Backtester: Bricks nach Entry-Brick-Index)
-        trade_lock        = load_or_create_trade_lock()
-        entry_brick_count = trade_lock.get(f"{symbol_timeframe}_entry_brick_count")
-        entry_time_str    = trade_lock.get(f"{symbol_timeframe}_entry_time")
-
-        if entry_brick_count is not None:
-            post_entry_bricks = bricks[int(entry_brick_count):]
-        else:
-            post_entry_bricks = bricks[-10:]  # Fallback
-
-        if not post_entry_bricks:
-            logger.info("Noch keine neuen Bricks seit Entry – Position hält.")
-            return
-
-        # Prüfe ob Gegenbrick vorhanden
-        for brick in post_entry_bricks:
+        for brick in bricks:
             if pos_side == 'long' and brick['direction'] == 'down':
                 logger.info(f"Brick-Reversal: DOWN-Brick nach Long-Entry → schließe Position.")
                 _close_position(exchange, symbol, pos_info, params, telegram_config, logger, 'brick_reversal_down')
@@ -529,7 +531,6 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         trade_lock[f"{symbol_timeframe}_last_entry_price"]  = entry_price
         trade_lock[f"{symbol_timeframe}_entry_time"]        = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         trade_lock[f"{symbol_timeframe}_entry_side"]        = 'long' if signal_side == 'buy' else 'short'
-        trade_lock[f"{symbol_timeframe}_entry_brick_count"] = len(bricks)
         trade_lock[f"{symbol_timeframe}_position_open"]     = True
         save_trade_lock(trade_lock)
 

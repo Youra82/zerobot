@@ -70,6 +70,38 @@ class Exchange:
             return data.tail(limit)
         return pd.DataFrame()
 
+    def fetch_ohlcv_since(self, symbol, timeframe, since_ms, limit=1000):
+        """
+        Holt alle Kerzen ab since_ms (fester Anker) bis jetzt, gepaged falls >limit.
+        Im Gegensatz zu fetch_recent_ohlcv (rollierendes Fenster, dessen Anfang sich mit
+        jedem Aufruf verschiebt) bleibt der Start hier immer gleich -> reproduzierbar
+        fuer pfadabhaengige Berechnungen (z.B. EAR-Brick-Reversal-Check ab Entry-Anker).
+        """
+        if not self.markets:
+            return pd.DataFrame()
+        try:
+            all_ohlcv = []
+            since = since_ms
+            while True:
+                batch = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+                if not batch:
+                    break
+                all_ohlcv.extend(batch)
+                if len(batch) < limit:
+                    break
+                since = batch[-1][0] + 1
+
+            if not all_ohlcv:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+            df.set_index('timestamp', inplace=True)
+            return df[~df.index.duplicated(keep='first')].sort_index()
+        except Exception as e:
+            logger.error(f"Fehler bei fetch_ohlcv_since für {symbol}: {e}")
+            return pd.DataFrame()
+
     def fetch_historical_ohlcv(self, symbol, timeframe, start_date_str, end_date_str):
         if not self.markets:
             return pd.DataFrame()

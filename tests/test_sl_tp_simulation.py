@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -179,11 +180,19 @@ def test_tp_brick_reversal_closes_position(exchange_fixture):
         {'direction': 'down', 'close': entry_price * 1.01},  # Gegenbrick
     ]
 
-    # entry_brick_count=2 -> post_entry_bricks = bricks[2:] = [DOWN-Brick]
+    # _build_bricks ist gemockt -> Rueckgabe ignoriert init_lc/init_direction/df.
+    # entry_time/last_entry_price/entry_side sind trotzdem noetig, da
+    # check_and_close_on_brick_reversal ohne diesen Anker sofort abbricht.
+    # entry_time wird 20min zurueckdatiert, damit fetch_ohlcv_since(seit Entry) auch
+    # tatsaechlich mind. eine abgeschlossene 15m-Kerze zurueckgibt (sonst haelt die
+    # Funktion korrekterweise, weil es "seit Entry" schlicht noch keine neue Kerze gibt).
     sym_tf = f"{SYMBOL.replace('/', '-')}_{TIMEFRAME}"
     trade_lock = load_or_create_trade_lock()
-    trade_lock[f'{sym_tf}_entry_brick_count'] = 2
-    trade_lock[f'{sym_tf}_entry_side']        = 'long'
+    trade_lock[f'{sym_tf}_entry_side']       = 'long'
+    trade_lock[f'{sym_tf}_last_entry_price'] = entry_price
+    trade_lock[f'{sym_tf}_entry_time']       = (
+        datetime.now(timezone.utc) - timedelta(minutes=20)
+    ).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     save_trade_lock(trade_lock)
 
     params = {
