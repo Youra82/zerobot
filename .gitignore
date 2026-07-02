@@ -1,6 +1,5 @@
 secret.json
 secret.json.bak
-settings.json
 __pycache__/
 *.pyc
 *.pyo
