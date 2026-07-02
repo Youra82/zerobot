@@ -303,6 +303,7 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                 ticker      = exchange.fetch_ticker(symbol)
                 exit_price  = ticker['last']
                 entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
+                sl_price    = trade_lock.get(f'{symbol_timeframe}_sl_price')
                 pnl         = _pnl_str(entry_price, exit_price, pos_side) if entry_price else "?"
                 msg = (
                     f"ZEROBOT (EAR) - Trade geschlossen (TP)\n"
@@ -327,7 +328,8 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                     _send_brick_chart(bricks, symbol, tf,
                                       float(entry_price) if entry_price else None,
                                       float(exit_price), pos_side,
-                                      telegram_config, logger)
+                                      telegram_config, logger,
+                                      sl_price=float(sl_price) if sl_price else None)
             except Exception:
                 pass
     except Exception as e:
@@ -544,6 +546,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         set_trade_lock(symbol_timeframe)
         trade_lock = load_or_create_trade_lock()
         trade_lock[f"{symbol_timeframe}_last_entry_price"]  = entry_price
+        trade_lock[f"{symbol_timeframe}_sl_price"]          = sl_rounded
         trade_lock[f"{symbol_timeframe}_entry_time"]        = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         trade_lock[f"{symbol_timeframe}_entry_side"]        = 'long' if signal_side == 'buy' else 'short'
         trade_lock[f"{symbol_timeframe}_position_open"]     = True
@@ -600,6 +603,7 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
     """Erkennt Bitget-SL-Fire und sendet Telegram-Benachrichtigung (inkl. Brick-Chart, analog zum TP-Exit)."""
     entry_side  = trade_lock.get(f'{symbol_timeframe}_entry_side', '?')
     entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
+    sl_price    = trade_lock.get(f'{symbol_timeframe}_sl_price')
 
     try:
         ticker     = exchange.fetch_ticker(symbol)
@@ -637,7 +641,8 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
                                       float(entry_price) if entry_price else None,
                                       float(exit_price) if exit_price else None,
                                       entry_side if entry_side in ('long', 'short') else None,
-                                      telegram_config, logger)
+                                      telegram_config, logger,
+                                      sl_price=float(sl_price) if sl_price else None)
             except Exception:
                 pass
 
