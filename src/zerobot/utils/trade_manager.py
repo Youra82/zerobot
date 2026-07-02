@@ -523,7 +523,22 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         pos_info  = position[0]
         contracts = float(pos_info['contracts'])
 
-        exchange.place_sl_trigger_order(symbol, tsl_side, contracts, sl_rounded, hold_side)
+        sl_result = exchange.place_sl_trigger_order(symbol, tsl_side, contracts, sl_rounded, hold_side)
+        sl_ok     = bool(sl_result) and sl_result.get('code') == '00000'
+
+        if not sl_ok:
+            logger.error(f"SL-Trigger-Order fehlgeschlagen ({sl_result}) — schließe Position sofort wieder, "
+                         f"kein ungeschützter Trade.")
+            exchange.flash_close_position(symbol)
+            if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
+                send_message(
+                    telegram_config['bot_token'], telegram_config['chat_id'],
+                    f"ZEROBOT (EAR) - WARNUNG: SL-Order fehlgeschlagen!\n"
+                    f"- Symbol: {symbol} ({timeframe})\n"
+                    f"- Antwort: {sl_result}\n"
+                    f"- Position wurde sofort wieder geschlossen (kein ungeschützter Trade)."
+                )
+            return
 
         # Entry-Zeit, Seite und Position-Flag speichern
         set_trade_lock(symbol_timeframe)
