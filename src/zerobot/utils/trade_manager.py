@@ -587,7 +587,7 @@ def full_trade_cycle(exchange, model, scaler, params, telegram_config, logger):
             trade_lock = load_or_create_trade_lock()
             if trade_lock.get(f'{symbol_timeframe}_position_open'):
                 _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe,
-                                 trade_lock, telegram_config, logger)
+                                 trade_lock, telegram_config, logger, params)
 
             housekeeper_routine(exchange, symbol, logger)
             check_and_open_new_position(exchange, model, scaler, params, telegram_config, logger)
@@ -596,8 +596,8 @@ def full_trade_cycle(exchange, model, scaler, params, telegram_config, logger):
         time.sleep(5)
 
 
-def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, telegram_config, logger):
-    """Erkennt Bitget-SL-Fire und sendet Telegram-Benachrichtigung."""
+def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, telegram_config, logger, params=None):
+    """Erkennt Bitget-SL-Fire und sendet Telegram-Benachrichtigung (inkl. Brick-Chart, analog zum TP-Exit)."""
     entry_side  = trade_lock.get(f'{symbol_timeframe}_entry_side', '?')
     entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
 
@@ -620,6 +620,26 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
             f"- PnL: ~{pnl}"
         )
         send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
+
+        if params is not None:
+            try:
+                strat_params = params.get('strategy', {})
+                recent_data  = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
+                if not recent_data.empty:
+                    atr_ind = ta.volatility.AverageTrueRange(
+                        high=recent_data['high'], low=recent_data['low'],
+                        close=recent_data['close'], window=14)
+                    recent_data['atr'] = atr_ind.average_true_range()
+                    recent_data.dropna(subset=['atr'], inplace=True)
+                    engine = EAREngine(settings=strat_params)
+                    bricks = engine._build_bricks(recent_data)
+                    _send_brick_chart(bricks, symbol, timeframe,
+                                      float(entry_price) if entry_price else None,
+                                      float(exit_price) if exit_price else None,
+                                      entry_side if entry_side in ('long', 'short') else None,
+                                      telegram_config, logger)
+            except Exception:
+                pass
 
     trade_lock.pop(f'{symbol_timeframe}_position_open', None)
     save_trade_lock(trade_lock)
