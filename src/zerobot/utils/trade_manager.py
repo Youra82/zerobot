@@ -304,6 +304,7 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                 exit_price  = ticker['last']
                 entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
                 sl_price    = trade_lock.get(f'{symbol_timeframe}_sl_price')
+                entry_time_str = trade_lock.get(f'{symbol_timeframe}_entry_time')
                 pnl         = _pnl_str(entry_price, exit_price, pos_side) if entry_price else "?"
                 msg = (
                     f"ZEROBOT (EAR) - Trade geschlossen (TP)\n"
@@ -314,22 +315,23 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                     f"- Grund: {reason}"
                 )
                 send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
-                # Brick-Chart senden (mit persistiertem State = identisch zum Live-Bot)
-                strat_params = params.get('strategy', {})
-                recent_data  = exchange.fetch_recent_ohlcv(symbol, tf, limit=1000)
-                if not recent_data.empty:
-                    atr_ind = ta.volatility.AverageTrueRange(
-                        high=recent_data['high'], low=recent_data['low'],
-                        close=recent_data['close'], window=14)
-                    recent_data['atr'] = atr_ind.average_true_range()
-                    recent_data.dropna(subset=['atr'], inplace=True)
-                    engine      = EAREngine(settings=strat_params)
-                    bricks = engine._build_bricks(recent_data)
-                    _send_brick_chart(bricks, symbol, tf,
-                                      float(entry_price) if entry_price else None,
-                                      float(exit_price), pos_side,
-                                      telegram_config, logger,
-                                      sl_price=float(sl_price) if sl_price else None)
+                # Brick-Chart mit demselben Anker (Entry-Preis/-Richtung ab Entry-Zeitpunkt)
+                # aufbauen, der auch die Reversal-Entscheidung getroffen hat - sonst zeigt das
+                # Bild eine unabhaengig neu gefaltete (und damit potenziell abweichende) Kette.
+                if entry_price is not None and entry_time_str is not None:
+                    strat_params   = params.get('strategy', {})
+                    entry_dt       = datetime.fromisoformat(entry_time_str)
+                    since_ms       = int(entry_dt.timestamp() * 1000)
+                    recent_data    = exchange.fetch_ohlcv_since(symbol, tf, since_ms)
+                    if not recent_data.empty:
+                        engine         = EAREngine(settings=strat_params)
+                        init_direction = 'up' if pos_side == 'long' else 'down'
+                        bricks = engine._build_bricks(recent_data, init_lc=float(entry_price),
+                                                      init_direction=init_direction)
+                        _send_brick_chart(bricks, symbol, tf,
+                                          float(entry_price), float(exit_price), pos_side,
+                                          telegram_config, logger,
+                                          sl_price=float(sl_price) if sl_price else None)
             except Exception:
                 pass
     except Exception as e:
@@ -601,9 +603,10 @@ def full_trade_cycle(exchange, model, scaler, params, telegram_config, logger):
 
 def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, telegram_config, logger, params=None):
     """Erkennt Bitget-SL-Fire und sendet Telegram-Benachrichtigung (inkl. Brick-Chart, analog zum TP-Exit)."""
-    entry_side  = trade_lock.get(f'{symbol_timeframe}_entry_side', '?')
-    entry_price = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
-    sl_price    = trade_lock.get(f'{symbol_timeframe}_sl_price')
+    entry_side     = trade_lock.get(f'{symbol_timeframe}_entry_side', '?')
+    entry_price    = trade_lock.get(f'{symbol_timeframe}_last_entry_price')
+    sl_price       = trade_lock.get(f'{symbol_timeframe}_sl_price')
+    entry_time_str = trade_lock.get(f'{symbol_timeframe}_entry_time')
 
     try:
         ticker     = exchange.fetch_ticker(symbol)
@@ -625,20 +628,19 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
         )
         send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
 
-        if params is not None:
+        if params is not None and entry_price is not None and entry_time_str is not None:
             try:
-                strat_params = params.get('strategy', {})
-                recent_data  = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
+                strat_params   = params.get('strategy', {})
+                entry_dt       = datetime.fromisoformat(entry_time_str)
+                since_ms       = int(entry_dt.timestamp() * 1000)
+                recent_data    = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
                 if not recent_data.empty:
-                    atr_ind = ta.volatility.AverageTrueRange(
-                        high=recent_data['high'], low=recent_data['low'],
-                        close=recent_data['close'], window=14)
-                    recent_data['atr'] = atr_ind.average_true_range()
-                    recent_data.dropna(subset=['atr'], inplace=True)
-                    engine = EAREngine(settings=strat_params)
-                    bricks = engine._build_bricks(recent_data)
+                    engine         = EAREngine(settings=strat_params)
+                    init_direction = 'up' if entry_side == 'long' else 'down'
+                    bricks = engine._build_bricks(recent_data, init_lc=float(entry_price),
+                                                  init_direction=init_direction)
                     _send_brick_chart(bricks, symbol, timeframe,
-                                      float(entry_price) if entry_price else None,
+                                      float(entry_price),
                                       float(exit_price) if exit_price else None,
                                       entry_side if entry_side in ('long', 'short') else None,
                                       telegram_config, logger,
