@@ -332,8 +332,8 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                                           float(entry_price), float(exit_price), pos_side,
                                           telegram_config, logger,
                                           sl_price=float(sl_price) if sl_price else None)
-            except Exception:
-                pass
+            except Exception as chart_err:
+                logger.error(f"Chart-Erstellung (TP-Exit) fehlgeschlagen: {chart_err}", exc_info=True)
     except Exception as e:
         logger.error(f"Fehler beim Schließen der Position: {e}", exc_info=True)
 
@@ -645,8 +645,13 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
                                       entry_side if entry_side in ('long', 'short') else None,
                                       telegram_config, logger,
                                       sl_price=float(sl_price) if sl_price else None)
-            except Exception:
-                pass
+            except Exception as chart_err:
+                logger.error(f"Chart-Erstellung (SL-Fired) fehlgeschlagen: {chart_err}", exc_info=True)
+        elif params is None:
+            logger.warning("Kein 'params' übergeben - SL-Fired-Chart übersprungen.")
+        elif entry_price is None or entry_time_str is None:
+            logger.warning(f"Kein Entry-Preis/-Zeit im trade_lock ({symbol_timeframe}) - "
+                           f"SL-Fired-Chart übersprungen (vermutlich Position von vor diesem Fix).")
 
     trade_lock.pop(f'{symbol_timeframe}_position_open', None)
     save_trade_lock(trade_lock)
