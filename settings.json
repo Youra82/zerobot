@@ -5,7 +5,7 @@
         "active_strategies": [
             {
                 "symbol": "SOL/USDT:USDT",
-                "timeframe": "2h",
+                "timeframe": "1h",
                 "active": true
             },
             {
@@ -20,7 +20,7 @@
             },
             {
                 "symbol": "XRP/USDT:USDT",
-                "timeframe": "2h",
+                "timeframe": "1h",
                 "active": true
             },
             {
@@ -35,7 +35,7 @@
             },
             {
                 "symbol": "BNB/USDT:USDT",
-                "timeframe": "6h",
+                "timeframe": "2h",
                 "active": true
             }
         ]
