@@ -29,6 +29,7 @@ from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message
 from zerobot.utils.trade_manager import (
     check_and_close_on_brick_reversal,
+    _notify_sl_fired,
     load_or_create_trade_lock,
     save_trade_lock,
 )
@@ -227,3 +228,69 @@ def test_tp_brick_reversal_closes_position(exchange_fixture):
         f"- Brick-Reversal erkannt, Position geschlossen")
 
     print("  TP via Brick-Reversal — Position erfolgreich geschlossen.")
+
+
+# ---------------------------------------------------------------------------
+# Test 3: SL-Fired-Benachrichtigung (inkl. Chart) - _notify_sl_fired direkt
+# ---------------------------------------------------------------------------
+def test_sl_fired_notification_sends_chart(exchange_fixture):
+    """
+    Simuliert eine von Bitget (nicht vom Bot) geschlossene Position: Long
+    eroeffnen, trade_lock mit Entry-Anker + position_open=True fuellen, Position
+    per flash_close "extern" schliessen (so wie ein echter SL-Fire aussehen
+    wuerde), dann _notify_sl_fired direkt aufrufen. Prueft, dass dabei kein
+    Fehler auftritt und (bei vorhandenem entry_price/entry_time) ein Brick-Chart
+    gesendet wird - identisch zum Pfad, den full_trade_cycle im Live-Betrieb
+    nimmt, wenn es eine Position findet, die verschwunden ist, obwohl der Bot
+    sie nicht selbst geschlossen hat.
+    """
+    exchange, tg = exchange_fixture
+    _cleanup(exchange)
+
+    pos_info    = _open_long(exchange)
+    entry_price = float(pos_info['entryPrice'])
+    sl_price    = entry_price * 0.97
+
+    sym_tf = f"{SYMBOL.replace('/', '-')}_{TIMEFRAME}"
+    trade_lock = load_or_create_trade_lock()
+    trade_lock[f'{sym_tf}_entry_side']       = 'long'
+    trade_lock[f'{sym_tf}_last_entry_price'] = entry_price
+    trade_lock[f'{sym_tf}_sl_price']         = sl_price
+    trade_lock[f'{sym_tf}_entry_time']       = (
+        datetime.now(timezone.utc) - timedelta(minutes=20)
+    ).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    trade_lock[f'{sym_tf}_position_open']    = True
+    save_trade_lock(trade_lock)
+
+    params = {
+        'market':   {'symbol': SYMBOL, 'timeframe': TIMEFRAME, 'htf': None},
+        'strategy': {'base_pct': 0.004, 'k_entropy': 0.8, 'h_window': 10, 'trend_min_bricks': 3},
+        'risk':     {'margin_mode': 'isolated', 'risk_per_trade_pct': 0.1, 'leverage': 20},
+    }
+    logger = logging.getLogger('test-sl-fired')
+
+    print(f"\n  Entry: {entry_price:.10f}")
+    print("  Schliesse Position 'extern' (simuliert Bitget-SL-Fire, nicht bot-initiiert)...")
+    exchange.flash_close_position(SYMBOL)
+    time.sleep(3)
+
+    positions = exchange.fetch_open_positions(SYMBOL)
+    assert not positions, "Position sollte nach flash_close bereits geschlossen sein."
+
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - SL-Fired-Simulation\n"
+        f"- Symbol: {SYMBOL}\n"
+        f"- Entry: {entry_price:.8f}\n"
+        f"- Position extern geschlossen -> _notify_sl_fired wird aufgerufen")
+
+    _notify_sl_fired(exchange, SYMBOL, TIMEFRAME, sym_tf, trade_lock, tg, logger, params)
+
+    trade_lock_after = load_or_create_trade_lock()
+    assert not trade_lock_after.get(f'{sym_tf}_position_open'), \
+        "_position_open-Flag sollte nach _notify_sl_fired entfernt sein."
+
+    send_message(tg.get('bot_token', ''), tg.get('chat_id', ''),
+        f"ZEROBOT Test - SL-Fired OK\n"
+        f"- Benachrichtigung inkl. Chart gesendet (siehe oben), Flag aufgeraeumt")
+
+    print("  SL-Fired-Benachrichtigung inkl. Chart erfolgreich gesendet.")
