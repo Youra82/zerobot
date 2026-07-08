@@ -274,13 +274,13 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
             if side:
                 # Entry = letzter abgeschlossener Brick dieser Candle (nicht candle['close'],
                 # da mehrere Bricks pro Candle entstehen können und candle close ≠ brick close)
-                bidx = last_brick_idx_at_candle.get(i)
-                if bidx is not None and bidx > 0:
-                    entry_price = bricks[bidx]['close']        # letzter Brick-Level
-                    sl_price    = bricks[bidx - 1]['close']    # vorheriger Brick = SL (1 Brick Abstand)
-                else:
-                    entry_price = current_candle['close']
-                    sl_price    = entry_price * (0.99 if side == 'buy' else 1.01)
+                # sl_bricks_back Bricks vor Entry als SL. Die Signal-Schleife in ear_engine.py
+                # garantiert, dass ein Signal erst ab genug Brick-Historie feuert -> bidx - sl_bricks_back
+                # ist hier nie negativ.
+                sl_bricks_back = strategy_params.get('sl_bricks_back', 1)
+                bidx        = last_brick_idx_at_candle[i]
+                entry_price = bricks[bidx]['close']
+                sl_price    = bricks[bidx - sl_bricks_back]['close']
 
                 sl_dist = abs(entry_price - sl_price)
                 if sl_dist <= 0:

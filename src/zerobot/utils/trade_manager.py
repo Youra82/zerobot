@@ -179,7 +179,7 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
     if not bricks:
         return None
 
-    display_bricks = bricks[-n_bricks:]
+    display_bricks = bricks[-n_bricks:] if n_bricks is not None else bricks
     n = len(display_bricks)
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -234,8 +234,9 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
         ax.text(n - 0.5, exit_price, f"  Exit\n  {exit_price:.6g}",
                 color=exit_color, fontsize=7.5, va='center', ha='left')
 
-    side_label = f"{'LONG' if entry_side == 'long' else 'SHORT'} | " if entry_side else ""
-    ax.set_title(f"{symbol}  {timeframe}  |  {side_label}letzte {n} EAR-Bricks",
+    side_label  = f"{'LONG' if entry_side == 'long' else 'SHORT'} | " if entry_side else ""
+    bricks_desc = f"letzte {n} EAR-Bricks" if n_bricks is not None else f"alle {n} EAR-Bricks seit Entry"
+    ax.set_title(f"{symbol}  {timeframe}  |  {side_label}{bricks_desc}",
                  color='#e0e0e0', fontsize=11, pad=10)
     ax.tick_params(colors='#888888', labelsize=8)
     for spine in ax.spines.values():
@@ -261,13 +262,16 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
 
 
 def _send_brick_chart(bricks, symbol, timeframe, entry_price, exit_price,
-                      entry_side, telegram_config, logger, sl_price=None):
-    """Generiert PNG und sendet es via Telegram. Loescht Temp-Datei danach."""
+                      entry_side, telegram_config, logger, sl_price=None, n_bricks=60):
+    """Generiert PNG und sendet es via Telegram. Loescht Temp-Datei danach.
+
+    n_bricks=None zeigt alle Bricks (fuer Exit-Charts, die bereits ab Entry
+    anchoren) statt nur die letzten n_bricks (Default, fuer den Entry-Chart)."""
     if not telegram_config or not telegram_config.get('bot_token') or not telegram_config.get('chat_id'):
         return
     try:
         path = _generate_brick_png(bricks, symbol, timeframe, entry_price, exit_price,
-                                   entry_side, sl_price=sl_price)
+                                   entry_side, sl_price=sl_price, n_bricks=n_bricks)
         if path and os.path.exists(path):
             send_photo(telegram_config['bot_token'], telegram_config['chat_id'], path)
             os.remove(path)
@@ -331,7 +335,8 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                         _send_brick_chart(bricks, symbol, tf,
                                           float(entry_price), float(exit_price), pos_side,
                                           telegram_config, logger,
-                                          sl_price=float(sl_price) if sl_price else None)
+                                          sl_price=float(sl_price) if sl_price else None,
+                                          n_bricks=None)
             except Exception as chart_err:
                 logger.error(f"Chart-Erstellung (TP-Exit) fehlgeschlagen: {chart_err}", exc_info=True)
     except Exception as e:
@@ -470,15 +475,12 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             return
 
         # Entry = letzter Brick-Close (wie im Backtester: bricks[bidx]['close'])
-        # SL    = vorheriger Brick-Close (wie im Backtester: bricks[bidx-1]['close'])
-        bricks = engine._build_bricks(recent_data)
-        if bricks and len(bricks) > 1:
-            entry_price = bricks[-1]['close']   # letzter Brick-Level (= Backtester-Entry)
-            sl_price    = bricks[-2]['close']   # vorheriger Brick-Level (= Backtester-SL)
-        else:
-            ticker      = exchange.fetch_ticker(symbol)
-            entry_price = ticker['last']
-            sl_price    = entry_price * (0.99 if signal_side == 'buy' else 1.01)
+        # SL    = sl_bricks_back Bricks davor (wie im Backtester: bricks[bidx-sl_bricks_back]['close']).
+        # ear_engine.py garantiert per Signal-Startindex genug Brick-Historie -> kein Fallback nötig.
+        sl_bricks_back = strat_params.get('sl_bricks_back', 1)
+        bricks         = engine._build_bricks(recent_data)
+        entry_price    = bricks[-1]['close']
+        sl_price       = bricks[-1 - sl_bricks_back]['close']
 
         sl_dist = abs(entry_price - sl_price)
         if sl_dist <= 0:
@@ -644,7 +646,8 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
                                       float(exit_price) if exit_price else None,
                                       entry_side if entry_side in ('long', 'short') else None,
                                       telegram_config, logger,
-                                      sl_price=float(sl_price) if sl_price else None)
+                                      sl_price=float(sl_price) if sl_price else None,
+                                      n_bricks=None)
             except Exception as chart_err:
                 logger.error(f"Chart-Erstellung (SL-Fired) fehlgeschlagen: {chart_err}", exc_info=True)
         elif params is None:

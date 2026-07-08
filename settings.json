@@ -40,6 +40,9 @@
             }
         ]
     },
+    "strategy_overrides": {
+        "sl_bricks_back": 1
+    },
     "optimization_settings": {
         "enabled": true,
         "backtest_lookback_weeks": 4,

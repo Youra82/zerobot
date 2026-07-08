@@ -27,6 +27,7 @@ class EAREngine:
         self.k_entropy        = float(settings.get('k_entropy',        0.8))
         self.h_window         = int(  settings.get('h_window',         10))
         self.trend_min_bricks = int(  settings.get('trend_min_bricks', 3))
+        self.sl_bricks_back   = int(  settings.get('sl_bricks_back',   1))
 
     @staticmethod
     def _candle_entropy(o, h, l, c) -> float:
@@ -135,8 +136,12 @@ class EAREngine:
 
         bdf = pd.DataFrame(bricks)
 
+        # Startindex garantiert, dass bei jedem Signal mindestens sl_bricks_back
+        # Bricks davor existieren -> bidx - sl_bricks_back ist nie negativ,
+        # Backtester/Live-Bot brauchen dafür keinen Fallback.
         sig_map = {}   # candle_idx -> (signal_val, H)
-        for i in range(self.trend_min_bricks - 1, len(bdf)):
+        start_i = max(self.trend_min_bricks - 1, self.sl_bricks_back)
+        for i in range(start_i, len(bdf)):
             window_dirs = [bdf.iloc[j]['direction']
                            for j in range(i - self.trend_min_bricks + 1, i + 1)]
             if all(d == 'up'   for d in window_dirs):

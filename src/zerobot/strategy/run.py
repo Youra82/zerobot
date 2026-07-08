@@ -53,6 +53,16 @@ def load_config(symbol, timeframe):
         config = json.load(f)
 
     config['market']['htf'] = determine_htf(config['market']['timeframe'])
+
+    # Manuelle, optimizer-unabhängige Overrides aus settings.json (z.B. sl_bricks_back) —
+    # der wöchentliche Optimizer schreibt nur nach config_*.json, nie nach settings.json,
+    # diese Werte bleiben also über Re-Optimierungen hinweg unverändert.
+    settings_path = os.path.join(PROJECT_ROOT, 'settings.json')
+    if os.path.exists(settings_path):
+        with open(settings_path, 'r') as f:
+            settings = json.load(f)
+        config['strategy'].update(settings.get('strategy_overrides', {}))
+
     return config
 
 
