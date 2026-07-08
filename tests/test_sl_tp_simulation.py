@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
 import pytest
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -239,10 +241,14 @@ def test_sl_fired_notification_sends_chart(exchange_fixture):
     eroeffnen, trade_lock mit Entry-Anker + position_open=True fuellen, Position
     per flash_close "extern" schliessen (so wie ein echter SL-Fire aussehen
     wuerde), dann _notify_sl_fired direkt aufrufen. Prueft, dass dabei kein
-    Fehler auftritt und (bei vorhandenem entry_price/entry_time) ein Brick-Chart
-    gesendet wird - identisch zum Pfad, den full_trade_cycle im Live-Betrieb
-    nimmt, wenn es eine Position findet, die verschwunden ist, obwohl der Bot
-    sie nicht selbst geschlossen hat.
+    Fehler auftritt und ein Brick-Chart gesendet wird - identisch zum Pfad, den
+    full_trade_cycle im Live-Betrieb nimmt, wenn es eine Position findet, die
+    verschwunden ist, obwohl der Bot sie nicht selbst geschlossen hat.
+
+    fetch_ohlcv_since wird gemockt (Preisverlauf mit klarer Abwaertsbewegung seit
+    Entry), damit garantiert mind. ein Gegenbrick entsteht - ein echter, nur wenige
+    Minuten alter Live-Markt liefert oft zu wenig Bewegung fuer einen fertigen
+    Brick, das waere kein aussagekraeftiger Test der Chart-Funktion selbst.
     """
     exchange, tg = exchange_fixture
     _cleanup(exchange)
@@ -252,13 +258,12 @@ def test_sl_fired_notification_sends_chart(exchange_fixture):
     sl_price    = entry_price * 0.97
 
     sym_tf = f"{SYMBOL.replace('/', '-')}_{TIMEFRAME}"
+    entry_dt = datetime.now(timezone.utc) - timedelta(minutes=20)
     trade_lock = load_or_create_trade_lock()
     trade_lock[f'{sym_tf}_entry_side']       = 'long'
     trade_lock[f'{sym_tf}_last_entry_price'] = entry_price
     trade_lock[f'{sym_tf}_sl_price']         = sl_price
-    trade_lock[f'{sym_tf}_entry_time']       = (
-        datetime.now(timezone.utc) - timedelta(minutes=20)
-    ).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    trade_lock[f'{sym_tf}_entry_time']       = entry_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     trade_lock[f'{sym_tf}_position_open']    = True
     save_trade_lock(trade_lock)
 
@@ -268,6 +273,15 @@ def test_sl_fired_notification_sends_chart(exchange_fixture):
         'risk':     {'margin_mode': 'isolated', 'risk_per_trade_pct': 0.1, 'leverage': 20},
     }
     logger = logging.getLogger('test-sl-fired')
+
+    # Preisverlauf mit klarer Abwaertsbewegung seit Entry (Long -> Gegenbrick down)
+    n = 16
+    decline = list(np.linspace(entry_price, entry_price * 0.97, n))
+    idx = pd.date_range(start=entry_dt, periods=n, freq='1min')
+    synthetic_ohlcv = pd.DataFrame({
+        'open': decline, 'high': [p * 1.0005 for p in decline],
+        'low': [p * 0.9995 for p in decline], 'close': decline, 'volume': 1.0,
+    }, index=idx)
 
     print(f"\n  Entry: {entry_price:.10f}")
     print("  Schliesse Position 'extern' (simuliert Bitget-SL-Fire, nicht bot-initiiert)...")
@@ -283,7 +297,8 @@ def test_sl_fired_notification_sends_chart(exchange_fixture):
         f"- Entry: {entry_price:.8f}\n"
         f"- Position extern geschlossen -> _notify_sl_fired wird aufgerufen")
 
-    _notify_sl_fired(exchange, SYMBOL, TIMEFRAME, sym_tf, trade_lock, tg, logger, params)
+    with patch.object(exchange, 'fetch_ohlcv_since', return_value=synthetic_ohlcv):
+        _notify_sl_fired(exchange, SYMBOL, TIMEFRAME, sym_tf, trade_lock, tg, logger, params)
 
     trade_lock_after = load_or_create_trade_lock()
     assert not trade_lock_after.get(f'{sym_tf}_position_open'), \
