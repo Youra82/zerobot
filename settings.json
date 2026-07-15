@@ -1,16 +1,16 @@
 {
     "live_trading_settings": {
         "max_open_positions": 7,
-        "use_auto_optimizer_results": false,
+        "use_auto_optimizer_results": true,
         "active_strategies": [
             {
-                "symbol": "SOL/USDT:USDT",
+                "symbol": "ADA/USDT:USDT",
                 "timeframe": "1h",
                 "active": true
             },
             {
-                "symbol": "ADA/USDT:USDT",
-                "timeframe": "2h",
+                "symbol": "DOGE/USDT:USDT",
+                "timeframe": "4h",
                 "active": true
             },
             {
@@ -19,29 +19,24 @@
                 "active": true
             },
             {
-                "symbol": "XRP/USDT:USDT",
+                "symbol": "BNB/USDT:USDT",
+                "timeframe": "4h",
+                "active": true
+            },
+            {
+                "symbol": "SOL/USDT:USDT",
                 "timeframe": "1h",
                 "active": true
             },
             {
-                "symbol": "DOGE/USDT:USDT",
-                "timeframe": "6h",
-                "active": true
-            },
-            {
-                "symbol": "ETH/USDT:USDT",
-                "timeframe": "2h",
-                "active": true
-            },
-            {
-                "symbol": "BNB/USDT:USDT",
-                "timeframe": "2h",
+                "symbol": "LINK/USDT:USDT",
+                "timeframe": "4h",
                 "active": true
             }
         ]
     },
     "strategy_overrides": {
-        "sl_bricks_back": 1
+        "sl_bricks_back": 2
     },
     "optimization_settings": {
         "enabled": true,
