@@ -93,6 +93,7 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     portfolio_files    = []
     used_symbols       = set()
     best_portfolio_sim = None
+    best_portfolio_pnl = float('-inf')
 
     for candidate in single_strategy_results:
         coin = candidate['symbol'].split('/')[0]
@@ -108,12 +109,18 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
         if not result or result.get("liquidation_date"):
             continue
 
-        actual_dd = result.get('max_drawdown_pct', 100.0) / 100.0
-        if actual_dd <= target_max_dd_decimal:
+        actual_dd    = result.get('max_drawdown_pct', 100.0) / 100.0
+        candidate_pnl = result.get('total_pnl_pct', float('-inf'))
+        # Kandidat nur aufnehmen, wenn er die bisherige Portfolio-PnL nicht
+        # verschlechtert — sonst verdraengt er per geteiltem Margin-Topf
+        # nur bessere Trades bereits aufgenommener Strategien (siehe
+        # replay_portfolio_events: Positionen konkurrieren um dieselbe Equity).
+        if actual_dd <= target_max_dd_decimal and candidate_pnl >= best_portfolio_pnl:
             portfolio.append(candidate)
             portfolio_files.append(candidate['filename'])
             used_symbols.add(coin)
             best_portfolio_sim = result
+            best_portfolio_pnl = candidate_pnl
             print(f"  + {candidate['symbol']} / {candidate['timeframe']} "
                   f"(PnL: {result['total_pnl_pct']:.1f}%, MaxDD: {result['max_drawdown_pct']:.1f}%)")
 
