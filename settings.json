@@ -1,7 +1,7 @@
 {
     "live_trading_settings": {
         "max_open_positions": 7,
-        "use_auto_optimizer_results": true,
+        "use_auto_optimizer_results": false,
         "active_strategies": [
             {
                 "symbol": "ADA/USDT:USDT",
