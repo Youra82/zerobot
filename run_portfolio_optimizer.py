@@ -164,7 +164,7 @@ def _write_to_settings(portfolio_files: list, strategies_data: dict) -> None:
         new_strategies.append(entry)
     lt = settings.setdefault('live_trading_settings', {})
     lt['active_strategies']          = new_strategies
-    lt['use_auto_optimizer_results'] = True
+    lt['use_auto_optimizer_results'] = False
     with open(SETTINGS_PATH, 'w') as f:
         json.dump(settings, f, indent=4)
 
