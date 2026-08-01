@@ -9,28 +9,28 @@
                 "active": true
             },
             {
-                "symbol": "DOGE/USDT:USDT",
-                "timeframe": "4h",
+                "symbol": "ETH/USDT:USDT",
+                "timeframe": "1h",
                 "active": true
             },
             {
-                "symbol": "DOT/USDT:USDT",
-                "timeframe": "6h",
-                "active": true
-            },
-            {
-                "symbol": "BNB/USDT:USDT",
-                "timeframe": "4h",
-                "active": true
-            },
-            {
-                "symbol": "SOL/USDT:USDT",
+                "symbol": "XRP/USDT:USDT",
                 "timeframe": "1h",
                 "active": true
             },
             {
                 "symbol": "LINK/USDT:USDT",
-                "timeframe": "4h",
+                "timeframe": "1h",
+                "active": true
+            },
+            {
+                "symbol": "DOT/USDT:USDT",
+                "timeframe": "1h",
+                "active": true
+            },
+            {
+                "symbol": "BNB/USDT:USDT",
+                "timeframe": "1h",
                 "active": true
             }
         ]
