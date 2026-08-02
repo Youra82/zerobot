@@ -9,16 +9,53 @@ import numpy as np
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
+from zerobot.analysis.backtester import run_backtest
 from zerobot.analysis.portfolio_simulator import (
     collect_strategy_events,
     replay_portfolio_events,
 )
 
 
+def _smoothed_score(strat_data, start_capital, trade_start_date, end_anchor,
+                    step_days, num_samples):
+    """
+    Mittelt die Trailing-Performance ueber mehrere, um step_days versetzte
+    Snapshot-Fenster gleicher Laenge (statt nur einen Stichtag zu messen) —
+    validiert per reopt_smoothing.py (2 Tage x 7 Snapshots: Calmar 20.7 vs.
+    14.1 Baseline im OOS-Test). Reduziert die Anfaelligkeit der woechentlichen
+    Auswahl fuer einen Ausreisser-Trade kurz vor dem exakten Stichtag.
+    Aendert NICHTS an der tatsaechlich simulierten Portfolio-Performance
+    (die bleibt auf dem realen, aktuellen Fenster) — nur an der Rangfolge,
+    welche Timeframe pro Symbol bevorzugt wird.
+    """
+    data = strat_data.get('data')
+    if data is None or data.empty:
+        return None
+    lookback = pd.to_datetime(end_anchor, utc=True) - pd.to_datetime(trade_start_date, utc=True)
+    scores = []
+    for k in range(num_samples):
+        anchor = pd.to_datetime(end_anchor, utc=True) - pd.Timedelta(days=k * step_days)
+        window_start = anchor - lookback
+        data_slice = data[data.index < anchor]
+        if data_slice.empty or len(data_slice) < 100:
+            continue
+        try:
+            res = run_backtest(data_slice.copy(), strat_data['smc_params'], strat_data['risk_params'],
+                               start_capital, return_trades=False,
+                               trade_start_date=window_start.isoformat())
+        except Exception:
+            continue
+        if res and not res.get('liquidation_date'):
+            scores.append(res.get('total_pnl_pct', -999.0))
+    return float(np.mean(scores)) if scores else None
+
+
 def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date,
                             target_max_dd: float,
                             trade_start_date: str = None,
-                            oos_map: dict = None):
+                            oos_map: dict = None,
+                            smoothing_step_days: int = 2,
+                            smoothing_samples: int = 7):
     """
     Findet die beste Kombination von Strategien (Max DD <= target_max_dd, kein Coin doppelt).
     Greedy-Algorithmus — ausschließlich auf OOS-Periode (trade_start_date).
@@ -26,6 +63,10 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     oos_map: dict config_file → OOS-Ergebnis aus last_oos_run.json.
              Nur Strategien mit oos_pnl > 0 werden zugelassen.
     trade_start_date: Trades und Equity-Tracking erst ab diesem Datum.
+    smoothing_step_days/smoothing_samples: Rangfolge der Kandidaten (welche
+        Timeframe pro Symbol bevorzugt wird) basiert auf dem Mittel mehrerer
+        versetzter Trailing-Snapshots statt nur dem aktuellen Stichtag.
+        smoothing_samples=1 schaltet die Glaettung aus (altes Verhalten).
     """
     print(f"\n--- Starte Portfolio-Optimierung: Max DD <= {target_max_dd:.2f}% & ohne Coin-Kollisionen ---")
     target_max_dd_decimal = target_max_dd / 100.0
@@ -59,6 +100,10 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
 
     # ── Schritt 2: Einzel-Performance bewerten (aus gecachten Events) ─────────
     print("2/3: Analysiere Einzel-Performance...")
+    use_smoothing = smoothing_samples and smoothing_samples > 1 and trade_start_date
+    if use_smoothing:
+        print(f"    (Rangfolge geglaettet: {smoothing_samples} Snapshots "
+              f"alle {smoothing_step_days} Tage)")
     single_strategy_results = []
 
     for filename, strat_data in strategies_data.items():
@@ -69,6 +114,13 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
         if result and not result.get("liquidation_date"):
             actual_max_dd = result.get('max_drawdown_pct', 100.0) / 100.0
             if actual_max_dd <= target_max_dd_decimal:
+                sort_score = result['end_capital']
+                if use_smoothing:
+                    smoothed_pnl = _smoothed_score(
+                        strat_data, start_capital, trade_start_date, end_date,
+                        smoothing_step_days, smoothing_samples)
+                    if smoothed_pnl is not None:
+                        sort_score = start_capital * (1 + smoothed_pnl / 100.0)
                 single_strategy_results.append({
                     'filename':    filename,
                     'symbol':      strat_data['symbol'],
@@ -78,13 +130,14 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
                     'max_dd':      result['max_drawdown_pct'],
                     'win_rate':    result['win_rate'],
                     'trade_count': result['trade_count'],
+                    'sort_score':  sort_score,
                 })
 
     if not single_strategy_results:
         print("Keine Einzelstrategie erfüllt die Bedingungen.")
         return None
 
-    single_strategy_results.sort(key=lambda x: x['end_capital'], reverse=True)
+    single_strategy_results.sort(key=lambda x: x['sort_score'], reverse=True)
     print(f"-> {len(single_strategy_results)} valide Einzelstrategien gefunden.")
 
     # ── Schritt 3: Greedy-Portfolio-Aufbau (gecachte Events, kein Re-Backtest) ─

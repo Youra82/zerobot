@@ -523,11 +523,19 @@ def main() -> int:
         print(f"{R}  Keine Daten geladen.{NC}")
         return 1
 
+    # Rangfolge-Glaettung: welche Timeframe pro Symbol bevorzugt wird, basiert auf
+    # dem Mittel mehrerer versetzter Trailing-Snapshots statt nur dem Stichtag
+    # (validiert per reopt_smoothing.py: Calmar 20.7 vs. 14.1 Baseline, OOS-Test).
+    smoothing_step_days = int(opt.get('smoothing_step_days', 2))
+    smoothing_samples   = int(opt.get('smoothing_samples', 7))
+
     from zerobot.analysis.portfolio_optimizer import run_portfolio_optimizer
     result = run_portfolio_optimizer(
         capital, strategies_data, data_start, end_date, max_dd,
         trade_start_date=trade_start,
-        oos_map=oos_map if oos_map else None)
+        oos_map=oos_map if oos_map else None,
+        smoothing_step_days=smoothing_step_days,
+        smoothing_samples=smoothing_samples)
 
     if not result or not result.get('optimal_portfolio'):
         print(f"{R}  Kein Portfolio erfüllt MaxDD <= {max_dd:.0f}%.{NC}\n")

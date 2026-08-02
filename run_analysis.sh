@@ -66,10 +66,11 @@ echo "  21) trend_min_bricks-Sweep   (Mindest-Bricks gleiche Richtung 2-6)"
 echo "  22) k_entropy-Sweep          (Entropie-Gewichtung 0.4-1.5)"
 echo "  23) h_window-Sweep           (Entropie-Glaettung 5-20)"
 echo "  24) Timeframe-Vergleich"
+echo "  25) Reoptimierungs-Snapshot-Glaettung (4W-Lookback, woechentlich, geglaettet vs. Stichtag)"
 echo ""
 echo "   0) Alle 1-19 Analysen nacheinander"
 echo ""
-read -p "Auswahl (0-24): " MODE
+read -p "Auswahl (0-25): " MODE
 MODE="${MODE//[$'\r\n ']/}"
 echo ""
 
@@ -508,6 +509,19 @@ for tf in tfs:
 
 print(f"{'─'*65}")
 PYEOF2
+        ;;
+
+    25) echo -e "${GREEN}▶ Reoptimierungs-Snapshot-Glaettung${NC}"
+        echo "  backtest_lookback_weeks bleibt bei 4 Wochen, Team wechselt weiterhin nur"
+        echo "  woechentlich. Testet, ob die Trailing-Bewertung an mehreren Snapshot-Tagen"
+        echo "  (statt nur am Stichtag) gemessen und gemittelt werden sollte."
+        echo "  Simuliert wird nur der echte Out-of-Sample Dark Period (kein Lookahead)."
+        echo ""
+        if [ -z "$2" ]; then
+            CAP=$(ask_capital)
+        fi
+        $PYTHON "$SCRIPT_DIR/src/zerobot/analysis/reopt_smoothing.py" \
+            --capital "$CAP" $NO_TELEGRAM
         ;;
 
     *)  echo -e "${RED}Ungueltige Auswahl: $m${NC}" ;;

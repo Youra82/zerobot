@@ -10,5 +10,7 @@ artifacts/results/last_optimizer_run.json
 data/cache/
 logs/
 *.log
+daten/
+docs/
 .optimization_in_progress
 .last_optimization_run

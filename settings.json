@@ -41,6 +41,8 @@
     "optimization_settings": {
         "enabled": true,
         "backtest_lookback_weeks": 4,
+        "smoothing_step_days": 2,
+        "smoothing_samples": 7,
         "schedule": {
             "day_of_week": 6,
             "hour": 15,
