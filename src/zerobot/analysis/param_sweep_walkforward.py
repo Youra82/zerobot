@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -132,10 +132,22 @@ def main():
     print(f"  Zeitraum: {args.start_date} bis {args.end_date}  |  Fenster: {args.windows}")
     print()
 
+    fine_tf = FINE_TF_MAP.get(timeframe)
+
     all_data = {}
+    all_fine_data = {}
     for ws, we in windows:
         d = load_data(symbol, timeframe, ws, we)
         all_data[(ws, we)] = d
+        fine_d = None
+        if fine_tf:
+            try:
+                fine_d = load_data(symbol, fine_tf, ws, we)
+                if fine_d is None or fine_d.empty:
+                    fine_d = None
+            except Exception:
+                fine_d = None
+        all_fine_data[(ws, we)] = fine_d
 
     print(f"  {'Param-Wert':<14}", end='')
     for i, (ws, we) in enumerate(windows):
@@ -157,7 +169,7 @@ def main():
             if d.empty or len(d) < 20:
                 row += f"  {'—':>14}"
                 continue
-            res  = run_backtest(d.copy(), strategy, r_mod, args.capital)
+            res  = run_backtest(d.copy(), strategy, r_mod, args.capital, fine_data=all_fine_data.get((ws, we)))
             pnl  = res.get('total_pnl_pct', 0)
             window_pnls.append(pnl)
             row += f"  {pnl:>13.1f}%"

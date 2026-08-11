@@ -34,6 +34,7 @@ def collect_strategy_events(strat_key: str, strat: dict, start_capital: float,
             return_trades=True,
             trade_start_date=trade_start_date,
             verbose=False,
+            fine_data=strat.get('fine_data'),
         )
     except Exception:
         return []

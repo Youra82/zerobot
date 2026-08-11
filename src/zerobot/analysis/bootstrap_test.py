@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -126,7 +126,17 @@ def main():
             print(f"  {fn:<40} {'—':>7} {'—':>7} {'—':>9} {'—':>9}  n/a (keine Daten)")
             continue
 
-        res    = run_backtest(data.copy(), strategy, risk)
+        fine_tf = FINE_TF_MAP.get(timeframe)
+        fine_data = None
+        if fine_tf:
+            try:
+                fine_data = load_data(symbol, fine_tf, args.start_date, args.end_date)
+                if fine_data is None or fine_data.empty:
+                    fine_data = None
+            except Exception:
+                fine_data = None
+
+        res    = run_backtest(data.copy(), strategy, risk, fine_data=fine_data)
         trades = res.get('trades_count', 0)
         wr_pct = res.get('win_rate', 0)
 

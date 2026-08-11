@@ -19,6 +19,39 @@ from zerobot.utils.timeframe_utils import determine_htf
 
 secrets_cache = None
 
+# Feinere Timeframe je Strategie-Timeframe fuer die Intrabar-Reihenfolgen-Aufloesung
+# (SL vs. Brick-TP in derselben Kerze -- oraclebot-Muster).
+FINE_TF_MAP = {
+    '5m': '1m', '15m': '1m', '30m': '1m',
+    '1h': '5m', '2h': '5m',
+    '4h': '15m', '6h': '15m',
+    '1d': '1h',
+}
+
+
+def _resolve_ambiguous_exit(fine_slice, sl_price, tp_price, side):
+    """
+    Wenn eine Coarse-Kerze SOWOHL den SL als auch den ersten Gegen-Brick (TP)
+    beruehrt haette, per feineren Kerzen die tatsaechliche Reihenfolge
+    aufloesen, statt SL blind zu bevorzugen (bisherige Konvention).
+    Der TP-Preis ist zu diesem Zeitpunkt bereits als fester Brick-Close bekannt,
+    daher identische Pruefung wie beim SL-Level.
+    """
+    if fine_slice is None or fine_slice.empty:
+        return None, None
+    for _, bar in fine_slice.iterrows():
+        if side == 'long':
+            if bar['low'] <= sl_price:
+                return sl_price, 'sl'
+            if bar['high'] >= tp_price:
+                return tp_price, 'tp'
+        else:
+            if bar['high'] >= sl_price:
+                return sl_price, 'sl'
+            if bar['low'] <= tp_price:
+                return tp_price, 'tp'
+    return None, None
+
 
 def load_all_configs():
     """Load all config files from configs directory (no settings.json filter).
@@ -146,7 +179,7 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 
 def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
                  fee_pct_override=None, return_trades=False,
-                 trade_start_date=None):
+                 trade_start_date=None, fine_data=None):
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
@@ -196,6 +229,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
 
     trades_list      = []
     params_for_logic = {"strategy": strategy_params, "risk": risk_params}
+    coarse_duration  = processed_data.index[1] - processed_data.index[0] if len(processed_data.index) >= 2 else None
 
     for i, (timestamp, current_candle) in enumerate(processed_data.iterrows()):
         if current_capital <= 0:
@@ -209,26 +243,36 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
             exit_reason = None
 
             # 1. Candle-Level SL (fester Preis = Open des Entry-Bricks)
-            if position['side'] == 'long':
-                if current_candle['low'] <= position['stop_loss']:
-                    exit_price  = position['stop_loss']
-                    exit_reason = 'sl'
-            else:
-                if current_candle['high'] >= position['stop_loss']:
-                    exit_price  = position['stop_loss']
-                    exit_reason = 'sl'
+            sl_hit = (current_candle['low'] <= position['stop_loss']) if position['side'] == 'long' \
+                else (current_candle['high'] >= position['stop_loss'])
 
             # 2. Brick-Level TP: erster vollständiger Brick in Gegenrichtung
-            if exit_price is None:
-                for brick in candle_bricks:
-                    if position['side'] == 'long' and brick['direction'] == 'down':
-                        exit_price  = brick['close']
-                        exit_reason = 'tp'
-                        break
-                    elif position['side'] == 'short' and brick['direction'] == 'up':
-                        exit_price  = brick['close']
-                        exit_reason = 'tp'
-                        break
+            tp_price = None
+            for brick in candle_bricks:
+                if position['side'] == 'long' and brick['direction'] == 'down':
+                    tp_price = brick['close']
+                    break
+                elif position['side'] == 'short' and brick['direction'] == 'up':
+                    tp_price = brick['close']
+                    break
+
+            if sl_hit and tp_price is not None:
+                # Beide Level in derselben Kerze moeglich -- Reihenfolge unklar
+                # ohne feinere Daten. Per fine_data (falls vorhanden) real
+                # aufloesen statt SL blind zu bevorzugen (oraclebot-Muster).
+                exit_price = None
+                if fine_data is not None and coarse_duration is not None:
+                    fine_slice = fine_data.loc[
+                        (fine_data.index >= timestamp) & (fine_data.index < timestamp + coarse_duration)
+                    ]
+                    exit_price, exit_reason = _resolve_ambiguous_exit(
+                        fine_slice, position['stop_loss'], tp_price, position['side'])
+                if exit_price is None:
+                    exit_price, exit_reason = position['stop_loss'], 'sl'  # Fallback: alte Konvention
+            elif sl_hit:
+                exit_price, exit_reason = position['stop_loss'], 'sl'
+            elif tp_price is not None:
+                exit_price, exit_reason = tp_price, 'tp'
 
             if exit_price:
                 pnl_pct        = (exit_price / position['entry_price'] - 1) \

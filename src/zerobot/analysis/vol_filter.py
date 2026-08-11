@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -124,6 +124,16 @@ def main():
         print(f"Keine Daten fuer {symbol} {timeframe}.")
         return
 
+    fine_tf = FINE_TF_MAP.get(timeframe)
+    fine_data = None
+    if fine_tf:
+        try:
+            fine_data = load_data(symbol, fine_tf, args.start_date, args.end_date)
+            if fine_data is None or fine_data.empty:
+                fine_data = None
+        except Exception:
+            fine_data = None
+
     print("\n" + "=" * 70)
     print("  VOLATILITAETS-FILTER OPTIMIERUNG")
     print("=" * 70)
@@ -139,7 +149,7 @@ def main():
 
     s_no_filter = dict(strategy)
     s_no_filter['vol_filter_enabled'] = False
-    res_base = run_backtest(data.copy(), s_no_filter, risk, args.capital)
+    res_base = run_backtest(data.copy(), s_no_filter, risk, args.capital, fine_data=fine_data)
     pnl_base = res_base.get('total_pnl_pct', 0)
     results_for_mark['disabled'] = pnl_base
     is_current_base = not current_vfe
@@ -154,7 +164,7 @@ def main():
         s_mod = dict(strategy)
         s_mod['vol_filter_enabled'] = True
         s_mod['min_vol_ratio'] = mvr
-        res = run_backtest(data.copy(), s_mod, risk, args.capital)
+        res = run_backtest(data.copy(), s_mod, risk, args.capital, fine_data=fine_data)
         pnl = res.get('total_pnl_pct', 0)
         results_for_mark[mvr] = pnl
         if pnl > best_pnl:

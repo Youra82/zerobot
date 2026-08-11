@@ -30,7 +30,7 @@ except Exception:
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 from zerobot.analysis.walk_forward import detect_dark_period
 
 LOOKBACK_WEEKS  = 4
@@ -86,9 +86,19 @@ def collect_all_trades(configs, start_date, end_date):
         if data is None or data.empty or len(data) < 100:
             print(" keine Daten")
             continue
+        fine_tf = FINE_TF_MAP.get(tf)
+        fine_data = None
+        if fine_tf:
+            try:
+                fine_data = load_data(sym, fine_tf, start_date, end_date)
+                if fine_data is None or fine_data.empty:
+                    fine_data = None
+            except Exception:
+                fine_data = None
         try:
             res = run_backtest(data.copy(), cfg.get('strategy', {}), cfg.get('risk', {}),
-                               start_capital=100.0, return_trades=True, verbose=False)
+                               start_capital=100.0, return_trades=True, verbose=False,
+                               fine_data=fine_data)
         except Exception as e:
             print(f" Fehler: {e}")
             continue

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -103,6 +103,34 @@ def preload_data(configs, full_start_str, full_end_str):
     return cache
 
 
+def preload_fine_data(configs, full_start_str, full_end_str):
+    """Lade feinere Kerzen (FINE_TF_MAP) parallel zum Coarse-Cache, fuer SL/TP-
+    Intrabar-Aufloesung. Gleiches Cache-Key-Schema wie preload_data (sym, tf) —
+    tf bleibt der Coarse-Timeframe, die Daten selbst sind aber feiner."""
+    cache = {}
+    for fn, cfg in configs:
+        sym = cfg['market']['symbol']
+        tf  = cfg['market']['timeframe']
+        key = (sym, tf)
+        if key in cache:
+            continue
+        fine_tf = FINE_TF_MAP.get(tf)
+        if not fine_tf:
+            continue
+        try:
+            data = load_data(sym, fine_tf, full_start_str, full_end_str)
+            if data is None or data.empty:
+                continue
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index, utc=True)
+            elif data.index.tz is None:
+                data.index = data.index.tz_localize('UTC')
+            cache[key] = data
+        except Exception:
+            continue
+    return cache
+
+
 def slice_data(cache, symbol, tf, start_dt, end_dt):
     key  = (symbol, tf)
     data = cache.get(key)
@@ -113,7 +141,7 @@ def slice_data(cache, symbol, tf, start_dt, end_dt):
 
 
 def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
-                     min_candles=5, min_trades=2):
+                     min_candles=5, min_trades=2, fine_cache=None):
     """
     In-Sample Portfolio-Selektion: wählt beste Config pro Symbol anhand Calmar.
     Backtest läuft mit WARMUP_WEEKS Vorlauf (>100 Kerzen auch für Daily-TF),
@@ -134,9 +162,18 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
         # Backtest mit Warmup-Vorlauf (>100 Kerzen für Indikator-Init)
         is_data = slice_data(cache, sym, tf,
                              is_start - timedelta(weeks=WARMUP_WEEKS), is_end)
+        fine_data = None
+        if fine_cache:
+            try:
+                fine_data = slice_data(fine_cache, sym, tf,
+                                       is_start - timedelta(weeks=WARMUP_WEEKS), is_end)
+                if fine_data is None or fine_data.empty:
+                    fine_data = None
+            except Exception:
+                fine_data = None
         try:
             res = run_backtest(is_data, strategy, risk, 100.0, verbose=False,
-                               trade_start_date=is_start.isoformat())
+                               trade_start_date=is_start.isoformat(), fine_data=fine_data)
         except Exception:
             continue
 
@@ -155,7 +192,7 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
 
 
 def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
-                     max_dd_pct, min_trades=2):
+                     max_dd_pct, min_trades=2, fine_cache=None):
     """
     Simuliert wöchentlichen Auto-Optimizer mit N Wochen Lookback.
     Returns: (curve, empty_weeks, total_trades, total_wins)
@@ -173,7 +210,7 @@ def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
 
         portfolio = select_portfolio(configs, cache, is_start, week_start,
                                      max_dd_pct, min_candles=20,
-                                     min_trades=min_trades)
+                                     min_trades=min_trades, fine_cache=fine_cache)
 
         if not portfolio:
             empty_weeks += 1
@@ -192,12 +229,22 @@ def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
                                   week_start - timedelta(weeks=WARMUP_WEEKS), oos_end)
             if len(oos_data) < 2:
                 continue
+            fine_data = None
+            if fine_cache:
+                try:
+                    fine_data = slice_data(fine_cache, item['sym'], item['tf'],
+                                           week_start - timedelta(weeks=WARMUP_WEEKS), oos_end)
+                    if fine_data is None or fine_data.empty:
+                        fine_data = None
+                except Exception:
+                    fine_data = None
             strategy = item['cfg'].get('strategy', {})
             risk     = item['cfg'].get('risk', {})
             try:
                 res = run_backtest(oos_data, strategy, risk, cap_each,
                                    verbose=False, return_trades=True,
-                                   trade_start_date=week_start.isoformat())
+                                   trade_start_date=week_start.isoformat(),
+                                   fine_data=fine_data)
             except Exception:
                 continue
             oos_pnl  += res.get('end_capital', cap_each) - cap_each
@@ -489,6 +536,8 @@ def main():
         print(f"  {R}Keine Daten geladen.{NC}")
         return
 
+    fine_cache = preload_fine_data(configs, full_start_str, full_end_str)
+
     # ── OOS-Zeitraum (alle Lookbacks auf gleichem Zeitraum)
     oos_start_dt = pd.to_datetime(oos_start_str, utc=True)
     oos_end_dt   = pd.to_datetime(oos_end_str, utc=True)
@@ -514,7 +563,7 @@ def main():
         print(f"  {C}Lookback {weeks:2d}W ...{NC}", end='', flush=True)
         curve, empty_w, n_trades, n_wins = run_walk_forward(
             configs, cache, weeks, week_starts, args.capital, args.max_dd,
-            min_trades=args.min_trades)
+            min_trades=args.min_trades, fine_cache=fine_cache)
         calmar, pnl_pct, max_dd = compute_stats(curve, args.capital)
         wr = n_wins / n_trades * 100 if n_trades > 0 else 0.0
         results[weeks] = (curve, empty_w, n_trades, n_wins)

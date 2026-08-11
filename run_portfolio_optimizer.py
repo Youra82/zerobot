@@ -113,8 +113,14 @@ def _load_oos_info() -> tuple:
 
 
 def _build_strategies_data(config_files: list, fallback_start: str, end_date: str) -> dict:
-    from zerobot.analysis.backtester import load_data
+    from datetime import date, timedelta
+    from zerobot.analysis.backtester import load_data, FINE_TF_MAP
     strategies_data = {}
+    # Fein-Daten nur fuer ein realistisches Reoptimierungs-Fenster laden (nicht die
+    # volle mehrjaehrige Warmup-Historie) -- die Intrabar-Aufloesung wird ohnehin nur
+    # fuer den trade_start_date-Bereich (Lookback-Wochen) benoetigt, nicht fuer den
+    # Brick-Warmup. Haelt Laufzeit/Speicherbedarf der 48-Config-Ladephase im Rahmen.
+    fine_data_start = (date.today() - timedelta(days=90)).strftime('%Y-%m-%d')
     for path in tqdm(config_files, desc='Lade Configs & Daten'):
         fname = os.path.basename(path)
         try:
@@ -134,10 +140,24 @@ def _build_strategies_data(config_files: list, fallback_start: str, end_date: st
             if data is None or data.empty or len(data) < 50:
                 print(f"  {Y}Übersprungen (keine Daten): {fname}{NC}")
                 continue
+
+            # Feinere Kerzen fuer SL/TP-Intrabar-Aufloesung (oraclebot-Muster),
+            # begrenzt auf die letzten 90 Tage. Best-effort, sonst SL-first-Fallback.
+            fine_data = None
+            fine_tf = FINE_TF_MAP.get(timeframe)
+            if fine_tf:
+                try:
+                    fine_data = load_data(symbol, fine_tf, fine_data_start, end_date)
+                    if fine_data is None or fine_data.empty:
+                        fine_data = None
+                except Exception:
+                    fine_data = None
+
             strategies_data[fname] = {
                 'symbol':      symbol,
                 'timeframe':   timeframe,
                 'data':        data,
+                'fine_data':   fine_data,
                 'smc_params':  config.get('strategy', {}),
                 'risk_params': config.get('risk', {}),
                 'htf':         htf,

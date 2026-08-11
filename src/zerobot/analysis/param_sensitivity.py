@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -127,6 +127,16 @@ def main():
         print(f"Keine Daten fuer {symbol} {timeframe}.")
         return
 
+    fine_tf = FINE_TF_MAP.get(timeframe)
+    fine_data = None
+    if fine_tf:
+        try:
+            fine_data = load_data(symbol, fine_tf, args.start_date, args.end_date)
+            if fine_data is None or fine_data.empty:
+                fine_data = None
+        except Exception:
+            fine_data = None
+
     print("\n" + "=" * 75)
     print("  PARAMETER SENSITIVITY — TORNADO-DIAGRAMM")
     print("=" * 75)
@@ -134,7 +144,7 @@ def main():
     print(f"  Zeitraum: {args.start_date} bis {args.end_date}  |  Kapital: {args.capital} USDT")
     print()
 
-    baseline_res  = run_backtest(data.copy(), strategy, risk, args.capital)
+    baseline_res  = run_backtest(data.copy(), strategy, risk, args.capital, fine_data=fine_data)
     baseline_pnl  = baseline_res.get('total_pnl_pct', 0)
     print(f"  Baseline PnL: {baseline_pnl:.1f}%")
     print()
@@ -152,7 +162,7 @@ def main():
             new_val = base_val * (1 + var)
             r_mod   = dict(risk)
             r_mod[param] = new_val
-            res = run_backtest(data.copy(), strategy, r_mod, args.capital)
+            res = run_backtest(data.copy(), strategy, r_mod, args.capital, fine_data=fine_data)
             pnl = res.get('total_pnl_pct', 0)
             pnl_list.append(pnl)
             row_parts.append((var, new_val, pnl))

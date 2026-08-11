@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
 
 load_configs = load_all_configs
 
@@ -147,18 +147,30 @@ def main():
             header += f"  {'W ('+ws[2:7]+')':>12}"
         print(header)
 
+        fine_tf = FINE_TF_MAP.get(timeframe)
+
         row_pnl = f"  {'PnL%':<10}"
         window_data_cache = {}
+        fine_data_cache = {}
         window_pnls = []
 
         for ws, we in windows:
             d = load_data(symbol, timeframe, ws, we)
             window_data_cache[(ws, we)] = d
+            fine_d = None
+            if fine_tf:
+                try:
+                    fine_d = load_data(symbol, fine_tf, ws, we)
+                    if fine_d is None or fine_d.empty:
+                        fine_d = None
+                except Exception:
+                    fine_d = None
+            fine_data_cache[(ws, we)] = fine_d
             if d.empty or len(d) < 20:
                 row_pnl += f"  {'—':>12}"
                 window_pnls.append(None)
                 continue
-            res = run_backtest(d.copy(), strategy, risk, args.capital)
+            res = run_backtest(d.copy(), strategy, risk, args.capital, fine_data=fine_d)
             pnl = res.get('total_pnl_pct', 0)
             row_pnl += f"  {pnl:>11.1f}%"
             window_pnls.append(pnl)
@@ -181,12 +193,13 @@ def main():
                 if d.empty or len(d) < 20:
                     row_s += f"  {'—':>12}"
                     continue
+                fine_d = fine_data_cache.get((ws, we))
                 best_pnl = -9999
                 best_val = None
                 for vf in rr_variations:
                     r_mod = dict(risk)
                     r_mod['risk_reward_ratio'] = orig_rr * vf
-                    res = run_backtest(d.copy(), strategy, r_mod, args.capital)
+                    res = run_backtest(d.copy(), strategy, r_mod, args.capital, fine_data=fine_d)
                     p   = res.get('total_pnl_pct', -9999)
                     if p > best_pnl:
                         best_pnl = p
@@ -204,13 +217,14 @@ def main():
             if d.empty or len(d) < 20:
                 orig_best_per_window.append(None)
                 continue
+            fine_d = fine_data_cache.get((ws, we))
             valid_w_count += 1
             best_pnl = -9999
             best_val = None
             for vf in rr_variations:
                 r_mod = dict(risk)
                 r_mod['risk_reward_ratio'] = orig_rr * vf
-                res = run_backtest(d.copy(), strategy, r_mod, args.capital)
+                res = run_backtest(d.copy(), strategy, r_mod, args.capital, fine_data=fine_d)
                 p   = res.get('total_pnl_pct', -9999)
                 if p > best_pnl:
                     best_pnl = p
