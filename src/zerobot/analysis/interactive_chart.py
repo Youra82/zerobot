@@ -157,7 +157,7 @@ def _generate_chart(symbol: str, timeframe: str,
         print(f'{RED}Fehler: plotly / ta nicht installiert.{NC}')
         return ''
 
-    from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP
+    from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP, LazyFineData
 
     fine_tf = FINE_TF_MAP.get(timeframe)
 
@@ -174,14 +174,7 @@ def _generate_chart(symbol: str, timeframe: str,
         df_full.dropna(subset=['atr'], inplace=True)
         # Backtest auf vollen Daten, Trades erst ab trade_start_date/start_date
         bt_trade_start = trade_start_date or start_date
-        fine_data = None
-        if fine_tf:
-            try:
-                fine_data = load_data(symbol, fine_tf, warmup_start, end_date)
-                if fine_data is None or fine_data.empty:
-                    fine_data = None
-            except Exception:
-                fine_data = None
+        fine_data = LazyFineData(symbol, fine_tf) if fine_tf else None
         print('INFO: Fuehre OOS-Backtest durch (Warmup kausal, Trades ab ' + bt_trade_start + ')...')
         res = run_backtest(df_full.copy(), strategy_params, risk_params,
                            start_capital=start_capital, return_trades=True,
@@ -199,14 +192,7 @@ def _generate_chart(symbol: str, timeframe: str,
             high=df['high'], low=df['low'], close=df['close'], window=14)
         df['atr'] = atr_ind.average_true_range()
         df.dropna(subset=['atr'], inplace=True)
-        fine_data = None
-        if fine_tf:
-            try:
-                fine_data = load_data(symbol, fine_tf, start_date, end_date)
-                if fine_data is None or fine_data.empty:
-                    fine_data = None
-            except Exception:
-                fine_data = None
+        fine_data = LazyFineData(symbol, fine_tf) if fine_tf else None
         print('INFO: Fuehre Backtest durch...')
         res = run_backtest(df.copy(), strategy_params, risk_params,
                            start_capital=start_capital, return_trades=True,

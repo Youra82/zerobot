@@ -111,7 +111,15 @@ class Exchange:
             all_ohlcv = []
 
             while start_ts < end_ts:
-                ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=1000)
+                # WICHTIG: limit darf Bitgets tatsaechliches Server-Maximum (200 fuer
+                # diesen Endpoint) nicht ueberschreiten. Bei zu hohem limit liefert
+                # Bitget/ccxt still schweigend nur 200 Kerzen zurueck, verankert diese
+                # aber am FALSCHEN Ende des nominell angefragten (aber nicht lieferbaren)
+                # Fensters statt am angefragten "since" -- das fuehrte bei schnellen
+                # Timeframes (1m/5m/15m) zu systematischen ~8-Tage-Luecken (74% der
+                # Kerzen fehlten in einem beobachteten 3-Monats-Fetch). Siehe auch
+                # ltbbot/mbot/vbot/fibot/dnabot, die bereits korrekt mit 200 arbeiten.
+                ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=200)
                 if not ohlcv:
                     break
                 all_ohlcv.extend(ohlcv)

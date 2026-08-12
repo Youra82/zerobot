@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP
+from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP, LazyFineData
 from zerobot.utils.timeframe_utils import determine_htf
 
 CONFIGS_DIR  = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
@@ -117,14 +117,7 @@ def run_oos_test(oos_start: str, oos_end: str, warmup_start: str,
         print(f"    {len(full_data)} Kerzen geladen. Starte Walk-Forward OOS-Simulation ...")
 
         fine_tf = FINE_TF_MAP.get(timeframe)
-        fine_data = None
-        if fine_tf:
-            try:
-                fine_data = load_data(symbol, fine_tf, actual_warmup, oos_end)
-                if fine_data is None or fine_data.empty:
-                    fine_data = None
-            except Exception:
-                fine_data = None
+        fine_data = LazyFineData(symbol, fine_tf) if fine_tf else None
 
         # run_backtest with trade_start_date = oos_start
         # All data before oos_start = warmup (bricks build up state, no trades)

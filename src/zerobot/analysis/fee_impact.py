@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
+from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP, LazyFineData
 
 load_configs = load_all_configs
 
@@ -132,14 +132,7 @@ def main():
         print(f"  {'─'*65}")
 
         fine_tf = FINE_TF_MAP.get(timeframe)
-        fine_data = None
-        if fine_tf:
-            try:
-                fine_data = load_data(symbol, fine_tf, args.start_date, args.end_date)
-                if fine_data is None or fine_data.empty:
-                    fine_data = None
-            except Exception:
-                fine_data = None
+        fine_data = LazyFineData(symbol, fine_tf) if fine_tf else None
 
         results = []
         for fee in fee_levels:

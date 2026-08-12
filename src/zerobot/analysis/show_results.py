@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP
+from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP, LazyFineData
 from zerobot.analysis.portfolio_simulator import run_portfolio_simulation
 from zerobot.analysis.portfolio_optimizer import run_portfolio_optimizer
 from zerobot.utils.telegram import send_document
@@ -76,14 +76,7 @@ def run_single_analysis(start_date, end_date, start_capital):
             strategy_params['htf']       = config['market'].get('htf')
 
             fine_tf = FINE_TF_MAP.get(timeframe)
-            fine_data = None
-            if fine_tf:
-                try:
-                    fine_data = load_data(symbol, fine_tf, per_warmup, end_date)
-                    if fine_data is None or fine_data.empty:
-                        fine_data = None
-                except Exception:
-                    fine_data = None
+            fine_data = LazyFineData(symbol, fine_tf) if fine_tf else None
 
             result = run_backtest(data.copy(), strategy_params, risk_params, start_capital,
                                   verbose=False, trade_start_date=start_date, fine_data=fine_data)

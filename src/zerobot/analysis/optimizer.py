@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP
+from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP, LazyFineData
 from zerobot.utils.timeframe_utils import determine_htf
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -180,19 +180,11 @@ def main():
             continue
 
         # Feinere Kerzen fuer SL/TP-Intrabar-Reihenfolgen-Aufloesung (oraclebot-Muster) --
-        # einmalig pro Symbol/Timeframe. Best-effort: bei Fehler Fallback auf SL-first.
-        FINE_DATA = None
+        # on-demand (LazyFineData): laedt nur die Tage, an denen tatsaechlich eine
+        # same-candle SL/TP-Ambiguitaet auftritt, statt den ganzen Zeitraum vorab
+        # herunterzuladen. Eine Instanz wird ueber alle Optuna-Trials wiederverwendet.
         fine_tf = FINE_TF_MAP.get(timeframe)
-        if fine_tf:
-            try:
-                FINE_DATA = load_data(symbol, fine_tf, actual_start, args.end_date)
-                if FINE_DATA is None or FINE_DATA.empty:
-                    FINE_DATA = None
-                else:
-                    print(f"  Fein-Daten geladen: {fine_tf} ({len(FINE_DATA)} Kerzen).")
-            except Exception as _e:
-                print(f"  Warnung: Fein-Daten-Abruf ({fine_tf}) fehlgeschlagen ({_e}).")
-                FINE_DATA = None
+        FINE_DATA = LazyFineData(symbol, fine_tf) if fine_tf else None
 
         DB_FILE      = os.path.join(PROJECT_ROOT, 'artifacts', 'db', 'optuna_studies_zerobot.db')
         os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)

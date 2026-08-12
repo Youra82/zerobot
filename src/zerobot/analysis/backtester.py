@@ -53,6 +53,98 @@ def _resolve_ambiguous_exit(fine_slice, sl_price, tp_price, side):
     return None, None
 
 
+class LazyFineData:
+    """
+    On-Demand-Fetcher fuer Fein-Daten (Intrabar-Aufloesung). Laedt Fein-Kerzen
+    nur fuer die Tage, an denen im Backtest tatsaechlich eine same-candle
+    SL/TP-Ambiguitaet auftritt, statt den kompletten Backtest-Zeitraum vorab
+    herunterzuladen -- diese Ambiguitaet ist selten (die weit ueberwiegende
+    Mehrheit der Kerzen braucht nie eine Intrabar-Aufloesung).
+    Ergebnis ist identisch zum eagerly geladenen DataFrame, nur Zeitpunkt und
+    Groesse der Netzwerk-Fetches aendern sich. Pro (symbol, fine_tf)-Instanz
+    wiederverwendbar -- z.B. ueber alle Optuna-Trials eines Optimizer-Laufs
+    hinweg, damit einmal geladene Tage nicht mehrfach abgerufen werden.
+
+    WICHTIG: Fetcht bewusst NICHT ueber load_data() -- load_data() cached auf
+    EINE gemeinsame CSV-Datei pro (symbol, timeframe) und ueberschreibt diese
+    bei jedem Cache-Miss komplett mit dem neu angefragten (schmalen) Fenster.
+    Wiederholte schmale Lazy-Anfragen wuerden diese Datei gegenseitig
+    ueberschreiben/invalidieren (Cache-Thrashing, beobachtet: fuehrte zu
+    unterschiedlichen Backtest-Ergebnissen zwischen eager und lazy). Daher
+    direkter Exchange-Zugriff ohne Beruehrung des Disk-Caches.
+    """
+    def __init__(self, symbol, fine_tf):
+        self.symbol = symbol
+        self.fine_tf = fine_tf
+        self._days = {}
+        self._exchange = None
+
+    def _get_exchange(self):
+        global secrets_cache
+        if self._exchange is not None:
+            return self._exchange
+        try:
+            if secrets_cache is None:
+                with open(os.path.join(PROJECT_ROOT, 'secret.json'), "r") as f:
+                    secrets_cache = json.load(f)
+            api_setup = None
+            for key in ('zerobot', 'stbot', 'utbot2', 'titanbot'):
+                if key in secrets_cache:
+                    api_setup = secrets_cache[key][0]
+                    break
+            if api_setup:
+                self._exchange = Exchange(api_setup)
+        except Exception:
+            self._exchange = None
+        return self._exchange
+
+    def _ensure_day(self, day):
+        if day in self._days:
+            return
+        exchange = self._get_exchange()
+        if exchange is None or not exchange.markets:
+            self._days[day] = None
+            return
+        try:
+            day_str = day.strftime('%Y-%m-%d')
+            next_day_str = (day + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            df = exchange.fetch_historical_ohlcv(self.symbol, self.fine_tf, day_str, next_day_str)
+            self._days[day] = df if df is not None and not df.empty else None
+        except Exception:
+            self._days[day] = None
+
+    def get_slice(self, start_ts, end_ts):
+        if self.fine_tf is None:
+            return None
+        start_ts = pd.Timestamp(start_ts)
+        end_ts = pd.Timestamp(end_ts)
+        first_day = start_ts.floor('D')
+        last_day = (end_ts - pd.Timedelta(microseconds=1)).floor('D')
+        parts = []
+        day = first_day
+        while day <= last_day:
+            self._ensure_day(day)
+            if self._days[day] is not None:
+                parts.append(self._days[day])
+            day += pd.Timedelta(days=1)
+        if not parts:
+            return None
+        combined = pd.concat(parts).sort_index()
+        combined = combined[~combined.index.duplicated(keep='first')]
+        return combined.loc[(combined.index >= start_ts) & (combined.index < end_ts)]
+
+
+def _get_fine_slice(fine_data, start_ts, end_ts):
+    """Liest ein Fein-Daten-Fenster aus -- akzeptiert sowohl einen bereits
+    komplett geladenen DataFrame (alte, eager Nutzung) als auch ein
+    LazyFineData-Objekt (neue, on-demand Nutzung), per Duck-Typing."""
+    if fine_data is None:
+        return None
+    if hasattr(fine_data, 'get_slice'):
+        return fine_data.get_slice(start_ts, end_ts)
+    return fine_data.loc[(fine_data.index >= start_ts) & (fine_data.index < end_ts)]
+
+
 def load_all_configs():
     """Load all config files from configs directory (no settings.json filter).
     Used by analysis scripts so they work even if strategy isn't yet active."""
@@ -262,9 +354,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                 # aufloesen statt SL blind zu bevorzugen (oraclebot-Muster).
                 exit_price = None
                 if fine_data is not None and coarse_duration is not None:
-                    fine_slice = fine_data.loc[
-                        (fine_data.index >= timestamp) & (fine_data.index < timestamp + coarse_duration)
-                    ]
+                    fine_slice = _get_fine_slice(fine_data, timestamp, timestamp + coarse_duration)
                     exit_price, exit_reason = _resolve_ambiguous_exit(
                         fine_slice, position['stop_loss'], tp_price, position['side'])
                 if exit_price is None:
