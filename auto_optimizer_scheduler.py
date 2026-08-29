@@ -22,6 +22,7 @@ CACHE_DIR         = os.path.join(PROJECT_ROOT, 'data', 'cache')
 LOG_DIR           = os.path.join(PROJECT_ROOT, 'logs')
 SETTINGS_FILE     = os.path.join(PROJECT_ROOT, 'settings.json')
 PORTFOLIO_SCRIPT  = os.path.join(PROJECT_ROOT, 'run_portfolio_optimizer.py')
+INIT_BRICKS_SCRIPT = os.path.join(PROJECT_ROOT, 'init_brick_states.py')
 SECRET_FILE       = os.path.join(PROJECT_ROOT, 'secret.json')
 LAST_RUN_FILE     = os.path.join(CACHE_DIR, '.last_optimization_run')
 IN_PROGRESS_FILE  = os.path.join(CACHE_DIR, '.optimization_in_progress')
@@ -133,6 +134,21 @@ def _run_portfolio_optimizer(opt_settings: dict) -> int:
     return result.returncode
 
 
+def _run_init_brick_states() -> int:
+    """Waermt Brick-States fuer ALLE Configs vor (--all), nicht nur die
+    gerade aktiven -- die woechentliche Portfolio-Auswahl kann naechste
+    Woche andere Strategien aktivieren, die dann ohne Vorwaermung erst beim
+    ersten echten Signal-Check per Lazy-Bootstrap initialisiert wuerden
+    (funktioniert, aber ~30-40s Verzoegerung fuer diesen einen Cron-Lauf).
+    Ohne --force: vorhandene States werden nicht neu gebaut, nur Luecken
+    aufgefuellt -- billig, kein woechentlicher Vollaufbau aller 48 Configs."""
+    cmd = [sys.executable, INIT_BRICKS_SCRIPT, '--all']
+    _log("INIT_BRICK_STATES_START")
+    result = subprocess.run(cmd)
+    _log(f"INIT_BRICK_STATES_EXIT rc={result.returncode}")
+    return result.returncode
+
+
 def run_optimization(schedule: dict, opt_settings: dict, live_settings: dict, reason: str):
     os.makedirs(CACHE_DIR, exist_ok=True)
     start_time = datetime.now()
@@ -155,6 +171,14 @@ def run_optimization(schedule: dict, opt_settings: dict, live_settings: dict, re
     try:
         rc      = _run_portfolio_optimizer(opt_settings)
         success = (rc == 0)
+        if success:
+            try:
+                _run_init_brick_states()
+            except Exception as e:
+                # Vorwaermen ist ein Robustheits-Extra, kein Kernbestandteil der
+                # Optimierung -- ein Fehler hier darf den Erfolg der eigentlichen
+                # Portfolio-Optimierung nicht kippen (Lazy-Bootstrap faengt es live auf).
+                _log(f"INIT_BRICK_STATES_ERROR {e}")
     except Exception as e:
         _log(f"ERROR {e}")
     finally:
