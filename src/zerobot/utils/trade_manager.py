@@ -529,6 +529,22 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         pos_info  = position[0]
         contracts = float(pos_info['contracts'])
 
+        # Realer Fill-Preis der Market-Order kann vom theoretischen Brick-Close
+        # abweichen (Cronjob laeuft alle 15 Min, dazwischen bewegt sich der Preis).
+        # Fuer trade_lock/Reversal-Erkennung (check_for_reversal ankert die
+        # Brick-Rekonstruktion an diesem Preis) den echten Exchange-Fill-Preis
+        # verwenden statt des vorab kalkulierten theoretischen Werts. SL-Level
+        # und Positionsgroesse bleiben unveraendert (SL ist ein struktureller
+        # Brick-Preis, keine Distanz-vom-Entry-Groesse; Order-Sizing muss vor
+        # der Order feststehen).
+        real_entry_price = pos_info.get('entryPrice')
+        real_entry_price = float(real_entry_price) if real_entry_price else entry_price
+        fill_dev_pct      = abs(real_entry_price - entry_price) / entry_price * 100
+        if fill_dev_pct > 0.05:
+            logger.info(f"Fill-Preis weicht vom theoretischen Signal-Preis ab: "
+                        f"geplant ${entry_price:.6f} vs. real ${real_entry_price:.6f} "
+                        f"({fill_dev_pct:.3f}%)")
+
         sl_result = exchange.place_sl_trigger_order(symbol, tsl_side, contracts, sl_rounded, hold_side)
         sl_ok     = bool(sl_result) and sl_result.get('code') == '00000'
 
@@ -549,7 +565,7 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
         # Entry-Zeit, Seite und Position-Flag speichern
         set_trade_lock(symbol_timeframe)
         trade_lock = load_or_create_trade_lock()
-        trade_lock[f"{symbol_timeframe}_last_entry_price"]  = entry_price
+        trade_lock[f"{symbol_timeframe}_last_entry_price"]  = real_entry_price
         trade_lock[f"{symbol_timeframe}_sl_price"]          = sl_rounded
         trade_lock[f"{symbol_timeframe}_entry_time"]        = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         trade_lock[f"{symbol_timeframe}_entry_side"]        = 'long' if signal_side == 'buy' else 'short'
@@ -562,14 +578,15 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
                 f"ZEROBOT (EAR) - Trade eroeffnet\n"
                 f"- Symbol: {symbol} ({timeframe})\n"
                 f"- Richtung: {pos_side.upper()}\n"
-                f"- Entry: {entry_price:.8f}\n"
+                f"- Entry: {real_entry_price:.8f}"
+                + (f" (Signal: {entry_price:.8f}, {fill_dev_pct:.2f}% Abweichung)" if fill_dev_pct > 0.05 else "") + "\n"
                 f"- SL: {sl_rounded:.8f} ({sl_dist/entry_price*100:.2f}%)\n"
                 f"- TP: erster Gegenbrick (dynamisch)"
             )
             send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
             # Brick-Chart senden — bricks bereits berechnet (mit persistiertem State)
             _send_brick_chart(bricks, symbol, timeframe,
-                              float(entry_price), None, entry_side_str,
+                              float(real_entry_price), None, entry_side_str,
                               telegram_config, logger, sl_price=float(sl_price))
 
         logger.info("Trade-Eröffnung erfolgreich. TP via Brick-Reversal-Check.")
