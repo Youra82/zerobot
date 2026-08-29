@@ -76,18 +76,37 @@ class Exchange:
         Im Gegensatz zu fetch_recent_ohlcv (rollierendes Fenster, dessen Anfang sich mit
         jedem Aufruf verschiebt) bleibt der Start hier immer gleich -> reproduzierbar
         fuer pfadabhaengige Berechnungen (z.B. EAR-Brick-Reversal-Check ab Entry-Anker).
+
+        WICHTIG: page_limit ist hart auf 200 gedeckelt, unabhaengig vom `limit`-Parameter
+        (der nur die Bedeutung "wie viel pro Page anfordern" hat, siehe fetch_historical_ohlcv-
+        Kommentar) -- Bitgets tatsaechliches Server-Maximum fuer diesen Endpoint ist 200.
+        Bei hoeherem Limit liefert Bitget/ccxt still schweigend nur 200 Kerzen, aber verankert
+        am FALSCHEN Ende des angefragten Fensters (verifiziert: since=X, limit=1000 lieferte
+        200 Kerzen beginnend >1 Monat NACH X statt ab X) -- ohne Fehler, ohne Warnung, mit
+        riesigen stillen Luecken als Folge.
         """
         if not self.markets:
             return pd.DataFrame()
+        page_limit = min(limit, 200)
         try:
             all_ohlcv = []
             since = since_ms
+            empty_retries = 0
             while True:
-                batch = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+                batch = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=page_limit)
                 if not batch:
+                    # Kann echtes Ende der Historie sein ODER ein transienter
+                    # Rate-Limit-/Netzwerk-Hickup, der sich als leere Antwort statt
+                    # Fehler zeigt -- einmal kurz retryen bevor wir das als "fertig"
+                    # akzeptieren, sonst wird der Fetch still und unbemerkt abgeschnitten.
+                    if empty_retries < 2:
+                        empty_retries += 1
+                        time.sleep(1.5)
+                        continue
                     break
+                empty_retries = 0
                 all_ohlcv.extend(batch)
-                if len(batch) < limit:
+                if len(batch) < page_limit:
                     break
                 since = batch[-1][0] + 1
 
@@ -110,6 +129,7 @@ class Exchange:
             end_ts    = int(self.exchange.parse8601(end_date_str   + 'T00:00:00Z'))
             all_ohlcv = []
 
+            empty_retries = 0
             while start_ts < end_ts:
                 # WICHTIG: limit darf Bitgets tatsaechliches Server-Maximum (200 fuer
                 # diesen Endpoint) nicht ueberschreiten. Bei zu hohem limit liefert
@@ -121,7 +141,23 @@ class Exchange:
                 # ltbbot/mbot/vbot/fibot/dnabot, die bereits korrekt mit 200 arbeiten.
                 ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=200)
                 if not ohlcv:
+                    # Leere Antwort kann echtes Ende der Historie sein ODER ein
+                    # transienter Rate-Limit-/Netzwerk-Hickup (beobachtet: brach bei
+                    # einem >3-Jahre-Fetch mitten in der Historie ab, weit vor dem
+                    # angefragten end_date, ohne Fehler -- nur eine leere Page wurde
+                    # als "fertig" missinterpretiert). Kurz retryen bevor wir das
+                    # akzeptieren, sonst wird der Fetch still unbemerkt abgeschnitten
+                    # und Aufrufer (z.B. Brick-State-Bootstrap) arbeiten mit einer
+                    # veralteten Teilhistorie ohne das zu merken.
+                    if empty_retries < 3:
+                        empty_retries += 1
+                        time.sleep(2.0)
+                        continue
+                    logger.warning(f"fetch_historical_ohlcv: leere Antwort ab {start_ts} "
+                                   f"nach {empty_retries} Retries -- breche ab (Endzeitpunkt "
+                                   f"war {end_date_str}, evtl. unvollstaendige Historie).")
                     break
+                empty_retries = 0
                 all_ohlcv.extend(ohlcv)
                 start_ts = ohlcv[-1][0] + 1
 

@@ -41,18 +41,46 @@ class EAREngine:
         pb /= s; ps /= s
         return float(-pb * np.log2(pb) - ps * np.log2(ps))
 
+    @staticmethod
+    def candle_entropy_vectorized(o, h, l, c) -> np.ndarray:
+        """Vektorisierte Variante von _candle_entropy fuer ganze Arrays --
+        bit-identisch zur skalaren Version (verifiziert), aber ohne
+        Python-Schleife. Fuer inkrementelle Fortsetzung einer laufenden
+        Kette, wo nur ein kleines Pufferfenster neu berechnet werden muss."""
+        hl  = h - l
+        eps = 1e-10
+        safe_hl = np.where(hl < 1e-12, 1.0, hl)
+        pb = np.clip((c - l) / safe_hl, eps, 1 - eps)
+        ps = np.clip((h - c) / safe_hl, eps, 1 - eps)
+        s  = pb + ps
+        pb = pb / s
+        ps = ps / s
+        ent = -pb * np.log2(pb) - ps * np.log2(ps)
+        return np.where(hl < 1e-12, 1.0, ent)
+
     def _build_bricks(self, df: pd.DataFrame,
                       init_lc: float = None,
-                      init_direction: str = None) -> list:
+                      init_direction: str = None,
+                      precomputed_H_roll=None) -> list:
         """
         Baut EAR-Bricks aus OHLCV. Gibt Liste von Dicts zurueck.
 
         init_lc / init_direction: persistierter State aus vorherigem Lauf.
         Ohne diese Parameter startet die Berechnung bei closes[0] (pfadabhaengig).
         Mit gespeichertem State ist die Brick-Struktur reproduzierbar.
+
+        precomputed_H_roll: optional vorberechnetes geglaettetes Entropie-Array
+        (gleiche Laenge wie df). Fuer inkrementelle Fortsetzung einer bereits
+        laufenden Kette (trade_manager.py) -- dort wird H_roll aus einem
+        kleinen Puffer-Fenster VOR den neuen Kerzen berechnet, damit das
+        Rolling-Mean an der Nahtstelle korrekt ist, ohne die Pufferkerzen
+        selbst nochmal durch die Brick-Konstruktion laufen zu lassen (das
+        wuerde bereits verarbeitete Bricks doppelt erzeugen). Ohne dieses
+        Argument identisch zum bisherigen Verhalten.
         """
         n = len(df)
-        if n < 2:
+        min_n = 1 if init_lc is not None else 2
+        if n < min_n:
             return []
 
         closes = df['close'].values
@@ -61,16 +89,26 @@ class EAREngine:
         opens  = df['open'].values
         atrs   = df['atr'].values if 'atr' in df.columns else np.full(n, np.nan)
 
-        # Entropie + geglättetes H
-        H_raw  = np.array([self._candle_entropy(opens[i], highs[i], lows[i], closes[i])
-                            for i in range(n)])
-        H_roll = pd.Series(H_raw).rolling(self.h_window, min_periods=1).mean().values
+        if precomputed_H_roll is not None:
+            H_roll = np.asarray(precomputed_H_roll)
+        else:
+            # Entropie + geglättetes H
+            H_raw  = np.array([self._candle_entropy(opens[i], highs[i], lows[i], closes[i])
+                                for i in range(n)])
+            H_roll = pd.Series(H_raw).rolling(self.h_window, min_periods=1).mean().values
 
         bricks    = []
         lc        = init_lc        if init_lc        is not None else closes[0]
         direction = init_direction if init_direction is not None else None
 
-        for i in range(1, n):
+        # Ohne expliziten Anker dient closes[0] nur als Referenzpunkt (Start bei i=1).
+        # MIT explizitem Anker (init_lc) ist bereits jede Kerze ab i=0 gegen den Anker
+        # zu pruefen -- sonst wuerde bei inkrementeller Fortsetzung (trade_manager.py:
+        # update_brick_chain) systematisch genau die neueste Kerze jedes Batches
+        # uebersprungen (bei typischerweise 1 neuer Kerze pro Cron-Lauf: JEDE Kerze).
+        start_i = 0 if init_lc is not None else 1
+
+        for i in range(start_i, n):
             H     = float(H_roll[i])
             bs    = lc * self.base_pct * (1.0 + self.k_entropy * H)
             price = closes[i]

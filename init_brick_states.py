@@ -135,7 +135,13 @@ def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
                 continue
 
             last = bricks[-1]
-            state = {'lc': last['close'], 'direction': last['direction']}
+            recent = [[b['direction'], b['close']] for b in bricks[-20:]]
+            state = {
+                'lc': last['close'],
+                'direction': last['direction'],
+                'last_processed_ts': data.index[-1].isoformat(),
+                'recent_bricks': recent,
+            }
             with open(state_file, 'w') as f:
                 json.dump(state, f)
 

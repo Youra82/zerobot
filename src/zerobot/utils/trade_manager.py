@@ -12,7 +12,6 @@ import ta
 import math
 
 from zerobot.strategy.ear_engine import EAREngine
-from zerobot.strategy.ear_logic import get_ear_signal
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.timeframe_utils import determine_htf
@@ -23,13 +22,17 @@ DB_PATH         = os.path.join(ARTIFACTS_PATH, 'db')
 TRADE_LOCK_FILE = os.path.join(DB_PATH, 'trade_lock.json')
 
 
+RECENT_BRICKS_KEEP = 20  # generous margin over max(trend_min_bricks, sl_bricks_back)
+
+
 def _brick_state_path(symbol_timeframe: str) -> str:
     safe = symbol_timeframe.replace('/', '-').replace(':', '-')
     return os.path.join(DB_PATH, f'ear_brick_state_{safe}.json')
 
 
 def load_brick_state(symbol_timeframe: str) -> dict:
-    """Laedt persistierten EAR-Brick-State (lc, direction) oder leeres Dict."""
+    """Laedt persistierten EAR-Brick-State (lc, direction, last_processed_ts,
+    recent_bricks) oder leeres Dict wenn noch keiner existiert."""
     path = _brick_state_path(symbol_timeframe)
     if os.path.exists(path):
         try:
@@ -40,11 +43,187 @@ def load_brick_state(symbol_timeframe: str) -> dict:
     return {}
 
 
-def save_brick_state(symbol_timeframe: str, lc: float, direction: str):
-    """Speichert letzten Brick-Level und Richtung fuer naechsten Lauf."""
+def save_brick_state(symbol_timeframe: str, state: dict):
+    """Speichert kompletten Brick-State (lc, direction, last_processed_ts,
+    recent_bricks) fuer den naechsten Lauf -- damit setzt die naechste
+    Kerzen-Pruefung die durchgehende Kette fort statt sie neu aufzubauen."""
     os.makedirs(DB_PATH, exist_ok=True)
     with open(_brick_state_path(symbol_timeframe), 'w') as f:
-        json.dump({'lc': lc, 'direction': direction}, f)
+        json.dump(state, f)
+
+
+def _bootstrap_brick_chain(exchange, symbol, timeframe, strat_params, warmup_start, logger):
+    """Einmaliger Aufbau der durchgehenden Brick-Kette aus voller Historie ab
+    warmup_start (wie init_brick_states.py / wie backtester.py) -- Startpunkt
+    fuer die anschliessende inkrementelle Fortsetzung. Wird automatisch
+    aufgerufen wenn noch kein persistierter State existiert."""
+    end_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    data = exchange.fetch_historical_ohlcv(symbol, timeframe, warmup_start, end_str)
+    if data is None or data.empty or len(data) < 50:
+        logger.error(f"Bootstrap: keine ausreichenden historischen Daten fuer {symbol} ({timeframe}).")
+        return None
+
+    engine = EAREngine(settings=strat_params)
+    bricks = engine._build_bricks(data)
+    if not bricks:
+        logger.error(f"Bootstrap: keine Bricks aus Historie fuer {symbol} ({timeframe}).")
+        return None
+
+    last = bricks[-1]
+    recent = [[b['direction'], b['close']] for b in bricks[-RECENT_BRICKS_KEEP:]]
+    return {
+        'lc': last['close'],
+        'direction': last['direction'],
+        'last_processed_ts': data.index[-1].isoformat(),
+        'recent_bricks': recent,
+    }
+
+
+def _check_new_bricks_signal(recent_before, new_bricks, trend_min_bricks, sl_bricks_back):
+    """Prueft JEDE neue Kerze dieses Batches der Reihe nach (nicht nur die
+    letzte!) auf ein gueltiges Entry-Signal und gibt das ERSTE zurueck, das
+    auftritt. Im Normalbetrieb (ein Cron-Check pro geschlossener Kerze,
+    typisch bei 15-Min-Cron auf 1h-6h-Timeframes) enthaelt ein Batch ohnehin
+    nur eine neue Kerze. Bei Nachhol-Batches mit mehreren neuen Kerzen (z.B.
+    nach Downtime) entspricht "erstes Signal gewinnt" der Reihenfolge, in
+    der die Signale live tatsaechlich aufgetreten waeren -- eine Pruefung,
+    die nur die letzte Kerze des Batches ansieht, wuerde Signale auf
+    frueheren Kerzen im selben Batch sonst still verlieren.
+
+    Pro Kerze wird die sig_map-Overwrite-Semantik aus
+    EAREngine.process_dataframe repliziert: bei mehreren Bricks auf
+    derselben Kerze gewinnt der letzte der die Bedingung erfuellt, ein
+    spaeterer erfolgloser Check loescht einen frueheren Erfolg auf
+    derselben Kerze NICHT (kein Reset, nur `continue`).
+
+    recent_before: bereits persistierte (direction, close)-Paare vor diesem
+    Batch. new_bricks: (candle_idx, direction, close)-Tupel aus diesem
+    Batch, aufsteigend nach candle_idx (Reihenfolge aus _build_bricks).
+    Gibt (side, entry_price, sl_price) oder (None, None, None) zurueck."""
+    combined = [tuple(x) for x in recent_before]
+    i = 0
+    n = len(new_bricks)
+    while i < n:
+        cidx = new_bricks[i][0]
+        winning_pos = None
+        winning_side = None
+        while i < n and new_bricks[i][0] == cidx:
+            _, direction, close = new_bricks[i]
+            combined.append((direction, close))
+            pos = len(combined) - 1
+            i += 1
+            if pos + 1 < trend_min_bricks:
+                continue
+            window_dirs = [combined[j][0] for j in range(pos - trend_min_bricks + 1, pos + 1)]
+            if all(d == 'up' for d in window_dirs):
+                winning_pos, winning_side = pos, 'long'
+            elif all(d == 'down' for d in window_dirs):
+                winning_pos, winning_side = pos, 'short'
+            # sonst: vorherigen Gewinner auf dieser Kerze (falls vorhanden) unveraendert lassen
+
+        if winning_pos is not None:
+            entry_price = combined[winning_pos][1]
+            sl_idx = winning_pos - sl_bricks_back
+            if sl_idx >= 0:
+                sl_price = combined[sl_idx][1]
+                return winning_side, entry_price, sl_price, cidx
+            # nicht genug Historie fuer SL -- diese Kerze uebergehen, naechste pruefen
+
+    return None, None, None, None
+
+
+def update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger):
+    """Fuehrt die durchgehende, persistierte Brick-Kette um alle seit dem
+    letzten Check neu geschlossenen Kerzen fort -- exakt wie der Backtester
+    (eine einzige kontinuierliche Kette ab dem historischen Start), NICHT
+    wie ein rollierendes Fenster ohne Anker (das bisherige, strukturell
+    andere Verhalten -- siehe Kommentar in check_and_open_new_position).
+
+    Gibt ein dict zurueck mit 'new_bricks' (Liste von (candle_idx, direction,
+    close) aus diesem Batch), 'recent_before' (persistierter State vor
+    diesem Batch, fuer die Signal-Pruefung), 'last_candle_idx' (Index der
+    zuletzt verarbeiteten Kerze in new_bricks' Nummerierung) und
+    'last_candle_close'. None wenn nichts Neues vorliegt oder ein Fehler
+    auftrat. Persistiert den aktualisierten State bereits selbst."""
+    symbol_timeframe = f"{symbol.replace('/', '-')}_{timeframe}"
+    state = load_brick_state(symbol_timeframe)
+
+    # 'lc'/'direction' reichen fuer den alten init_brick_states.py-Dateiformat
+    # (nur Brick-Level+Richtung); last_processed_ts/recent_bricks sind fuer die
+    # inkrementelle Fortsetzung zusaetzlich zwingend -- fehlen sie, neu bootstrapen
+    # statt mit unvollstaendigem State weiterzumachen.
+    required_keys = {'lc', 'direction', 'last_processed_ts', 'recent_bricks'}
+    if not state or not required_keys.issubset(state.keys()):
+        warmup_start = (meta or {}).get('train_start')
+        if not warmup_start:
+            logger.error(f"Kein persistierter Brick-State und kein _meta.train_start "
+                        f"fuer Bootstrap ({symbol_timeframe}).")
+            return None
+        logger.info(f"Kein persistierter Brick-State fuer {symbol_timeframe} "
+                    f"-- initialisiere aus Historie ab {warmup_start}...")
+        state = _bootstrap_brick_chain(exchange, symbol, timeframe, strat_params, warmup_start, logger)
+        if state is None:
+            return None
+        save_brick_state(symbol_timeframe, state)
+        logger.info(f"Brick-State initialisiert: lc={state['lc']:.6f} dir={state['direction']}")
+
+    last_ts = pd.Timestamp(state['last_processed_ts'])
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.tz_localize('UTC')
+    since_ms = int(last_ts.timestamp() * 1000) + 1
+
+    h_window = int(strat_params.get('h_window', 10))
+    buffer_n = h_window + 5
+
+    buffer_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=buffer_n)
+    new_data    = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
+    if new_data.empty:
+        return None  # keine neuen abgeschlossenen Kerzen seit dem letzten Check
+
+    combined_window = pd.concat([buffer_data, new_data]).sort_index()
+    combined_window = combined_window[~combined_window.index.duplicated(keep='last')]
+
+    H_raw = EAREngine.candle_entropy_vectorized(
+        combined_window['open'].values, combined_window['high'].values,
+        combined_window['low'].values, combined_window['close'].values)
+    H_roll_full = pd.Series(H_raw).rolling(h_window, min_periods=1).mean().values
+
+    is_new  = combined_window.index > last_ts
+    new_only = combined_window[is_new]
+    if new_only.empty:
+        return None
+    H_roll_new = H_roll_full[is_new]
+
+    engine = EAREngine(settings=strat_params)
+    raw_bricks = engine._build_bricks(new_only, init_lc=state['lc'], init_direction=state['direction'],
+                                       precomputed_H_roll=H_roll_new)
+    new_bricks = [(b['candle_idx'], b['direction'], b['close']) for b in raw_bricks]
+
+    recent_before = [tuple(x) for x in state.get('recent_bricks', [])]
+    combined_recent = recent_before + [(d, c) for (_, d, c) in new_bricks]
+    combined_recent = combined_recent[-RECENT_BRICKS_KEEP:]
+
+    if raw_bricks:
+        new_lc, new_direction = raw_bricks[-1]['close'], raw_bricks[-1]['direction']
+    else:
+        new_lc, new_direction = state['lc'], state['direction']
+
+    new_state = {
+        'lc': new_lc,
+        'direction': new_direction,
+        'last_processed_ts': new_only.index[-1].isoformat(),
+        'recent_bricks': [list(x) for x in combined_recent],
+    }
+    save_brick_state(symbol_timeframe, new_state)
+
+    return {
+        'new_bricks': new_bricks,
+        'recent_before': recent_before,
+        'last_candle_idx': len(new_only) - 1,
+        'last_candle_close': float(new_only['close'].iloc[-1]),
+        'last_candle_time': new_only.index[-1],
+        'new_candle_times': list(new_only.index),  # candle_idx (lokal im Batch) -> Zeitstempel
+    }
 
 
 def _chart_state_path(symbol_timeframe: str) -> str:
@@ -345,61 +524,40 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
 
 def check_and_close_on_brick_reversal(exchange, pos_info, params, telegram_config, logger):
     """
-    Prüft ob seit Trade-Eröffnung ein EAR-Brick in Gegenrichtung entstanden ist.
+    Prüft ob seit dem letzten Check ein EAR-Brick in Gegenrichtung entstanden ist.
     Falls ja → Position per Market Order schließen (Brick-TP-Exit).
 
-    Bricks werden ab dem exakten Entry-Anker (init_lc=Entry-Preis, init_direction=
-    Entry-Richtung) über die Kerzen SEIT Entry-Zeitpunkt neu aufgebaut. Ein rollierendes
-    Fenster (z.B. limit=1000 ab "jetzt") ist hier bewusst NICHT geeignet: _build_bricks ist
-    pfadabhängig vom ersten Kerzen-Close im Fenster, und dieser Anfang verschiebt sich bei
-    jedem Aufruf mit dem Fenster mit – dadurch faltet sich die komplette Brick-Kette bei
-    jedem Check anders (verifiziert an Live-Daten: bereits 5 Kerzen Versatz kehren die
-    Richtung des jüngsten Bricks um). Ab einem festen Anker (Entry) bleibt die Kette dagegen
-    über alle Checks hinweg identisch – neue Kerzen hängen sich nur an, nichts faltet neu.
+    Nutzt die durchgehende, persistierte Brick-Kette (update_brick_chain) --
+    dieselbe Kette, an der auch check_and_open_new_position weiterbaut, und
+    strukturell identisch zur Kette, die backtester.py fuer die komplette
+    Optimierungs-/Validierungs-Pipeline verwendet (eine einzige Kette ab dem
+    historischen Start, nie neu verankert). Vorher wurde hier bei jedem Check
+    eine EIGENE, am Entry-Preis neu verankerte Kette aufgebaut -- stabil ueber
+    wiederholte Checks, aber ein anderer Startpunkt als die Backtest-Kette,
+    und Renko-Bricks sind stark pfadabhaengig. Das erzeugte TP-Exits die vom
+    Backtester nie geprueft wurden.
     """
     symbol            = params['market']['symbol']
     timeframe         = params['market']['timeframe']
-    symbol_timeframe  = f"{symbol.replace('/', '-')}_{timeframe}"
     pos_side          = pos_info.get('side', '').lower()  # 'long' or 'short'
 
-    trade_lock     = load_or_create_trade_lock()
-    entry_price    = trade_lock.get(f"{symbol_timeframe}_last_entry_price")
-    entry_time_str = trade_lock.get(f"{symbol_timeframe}_entry_time")
-    entry_side     = trade_lock.get(f"{symbol_timeframe}_entry_side")  # 'long' / 'short'
-
-    if entry_price is None or entry_time_str is None or entry_side is None:
-        logger.warning("Kein Entry-Anker (Preis/Zeit/Seite) im trade_lock – Reversal-Check übersprungen.")
-        return
-
     try:
-        entry_dt = datetime.fromisoformat(entry_time_str)
-        since_ms = int(entry_dt.timestamp() * 1000)
-
-        recent_data = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
-        if recent_data.empty:
-            logger.info("Noch keine neuen Kerzen seit Entry – Position hält.")
+        strat_params = params.get('strategy', {})
+        meta         = params.get('_meta', {})
+        result = update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger)
+        if result is None:
+            logger.info("Noch keine neuen Kerzen seit letztem Check – Position hält.")
             return
 
-        strat_params   = params.get('strategy', {})
-        engine         = EAREngine(settings=strat_params)
-        init_direction = 'up' if entry_side == 'long' else 'down'
-        bricks = engine._build_bricks(recent_data, init_lc=float(entry_price), init_direction=init_direction)
-
-        if not bricks:
-            logger.info(f"Kein Gegenbrick seit Entry ({entry_time_str}) – Position hält ({pos_side}).")
-            return
-
-        for brick in bricks:
-            if pos_side == 'long' and brick['direction'] == 'down':
-                logger.info(f"Brick-Reversal: DOWN-Brick nach Long-Entry → schließe Position.")
-                _close_position(exchange, symbol, pos_info, params, telegram_config, logger, 'brick_reversal_down')
-                return
-            elif pos_side == 'short' and brick['direction'] == 'up':
-                logger.info(f"Brick-Reversal: UP-Brick nach Short-Entry → schließe Position.")
-                _close_position(exchange, symbol, pos_info, params, telegram_config, logger, 'brick_reversal_up')
+        opposite = 'down' if pos_side == 'long' else 'up'
+        for cidx, direction, close in result['new_bricks']:
+            if direction == opposite:
+                logger.info(f"Brick-Reversal: {direction.upper()}-Brick nach {pos_side.upper()}-Entry → schließe Position.")
+                _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
+                                f'brick_reversal_{direction}')
                 return
 
-        logger.info(f"Kein Gegenbrick seit Entry ({entry_time_str}) – Position hält ({pos_side}).")
+        logger.info(f"Kein Gegenbrick seit letztem Check – Position hält ({pos_side}).")
 
     except Exception as e:
         logger.error(f"Fehler bei Brick-Reversal-Check: {e}", exc_info=True)
@@ -417,30 +575,32 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
     try:
         logger.info(f"Prüfe ZeroBot (EAR) Signal für {symbol} ({timeframe})...")
 
-        recent_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=1000)
-        if recent_data.empty or len(recent_data) < 50:
-            logger.warning(f"Nicht genügend OHLCV-Daten (gefunden: {len(recent_data)}) – überspringe.")
+        strat_params = params.get('strategy', {})
+        meta         = params.get('_meta', {})
+
+        # Durchgehende, persistierte Brick-Kette fortsetzen (update_brick_chain) --
+        # strukturell identisch zur Kette, die backtester.py (und damit die gesamte
+        # Optuna-/Walk-Forward-/OOS-Pipeline) verwendet: EINE kontinuierliche Kette
+        # ab dem historischen Start, nie neu verankert. Vorher wurde hier bei jedem
+        # Cron-Lauf aus einem rollierenden 1000-Kerzen-Fenster OHNE Anker neu gebaut
+        # ("immer ab Kerze 0 der 1000 Kerzen") -- instabil (bereits 5 Kerzen Versatz
+        # kehren die Richtung des juengsten Bricks um, an Live-Daten verifiziert) und
+        # strukturell nie das System, das der Backtester geprueft hat.
+        result = update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger)
+        if result is None:
+            logger.info("Keine neuen abgeschlossenen Kerzen seit letztem Check – überspringe.")
             return
 
-        # ATR berechnen
-        strat_params  = params.get('strategy', {})
-        atr_indicator = ta.volatility.AverageTrueRange(
-            high=recent_data['high'], low=recent_data['low'],
-            close=recent_data['close'], window=14)
-        recent_data['atr'] = atr_indicator.average_true_range()
-        recent_data.dropna(subset=['atr'], inplace=True)
+        sl_bricks_back   = strat_params.get('sl_bricks_back', 1)
+        trend_min_bricks = strat_params.get('trend_min_bricks', 3)
+        signal_side_str, entry_price, sl_price, _ = _check_new_bricks_signal(
+            result['recent_before'], result['new_bricks'], trend_min_bricks, sl_bricks_back)
 
-        # EAR Engine — immer ab Kerze 0 der 1000 Kerzen, kein init_lc (keine Phantom-Bricks)
-        engine = EAREngine(settings=strat_params)
-
-        processed_data = engine.process_dataframe(recent_data)
-        current_candle = processed_data.iloc[-1]
-
-        signal_side, signal_price = get_ear_signal(processed_data, current_candle, params, Bias.NEUTRAL)
-
-        if not signal_side:
+        if not signal_side_str:
             logger.info("Kein EAR-Signal – überspringe.")
             return
+        signal_side  = 'buy' if signal_side_str == 'long' else 'sell'
+        signal_price = entry_price
 
         # Re-Entry-Schutz
         last_entry_key   = f"{symbol_timeframe}_last_entry_price"
@@ -474,14 +634,8 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             logger.error("Kein USDT-Guthaben.")
             return
 
-        # Entry = letzter Brick-Close (wie im Backtester: bricks[bidx]['close'])
-        # SL    = sl_bricks_back Bricks davor (wie im Backtester: bricks[bidx-sl_bricks_back]['close']).
-        # ear_engine.py garantiert per Signal-Startindex genug Brick-Historie -> kein Fallback nötig.
-        sl_bricks_back = strat_params.get('sl_bricks_back', 1)
-        bricks         = engine._build_bricks(recent_data)
-        entry_price    = bricks[-1]['close']
-        sl_price       = bricks[-1 - sl_bricks_back]['close']
-
+        # entry_price/sl_price bereits oben aus der durchgehenden Brick-Kette bestimmt
+        # (wie im Backtester: bricks[bidx]['close'] / bricks[bidx-sl_bricks_back]['close']).
         sl_dist = abs(entry_price - sl_price)
         if sl_dist <= 0:
             logger.error("SL-Abstand = 0, überspringe.")
@@ -584,8 +738,10 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
                 f"- TP: erster Gegenbrick (dynamisch)"
             )
             send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
-            # Brick-Chart senden — bricks bereits berechnet (mit persistiertem State)
-            _send_brick_chart(bricks, symbol, timeframe,
+            # Brick-Chart senden — aus der durchgehenden Kette (persistierter Teil + neue Bricks)
+            chart_bricks = ([{'direction': d, 'close': c} for d, c in result['recent_before']]
+                            + [{'direction': d, 'close': c} for _, d, c in result['new_bricks']])
+            _send_brick_chart(chart_bricks, symbol, timeframe,
                               float(real_entry_price), None, entry_side_str,
                               telegram_config, logger, sl_price=float(sl_price))
 
