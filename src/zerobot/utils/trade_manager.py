@@ -327,6 +327,20 @@ def housekeeper_routine(exchange, symbol, logger):
         return False
 
 
+def _compute_ema(exchange, symbol, timeframe, period=100):
+    """Aktueller EMA(period)-Wert auf Kerzen-Close, rein zur Visualisierung
+    auf dem Telegram-Chart (kein Einfluss auf die Handelslogik). Holt genug
+    Kerzen fuer eine eingeschwungene EMA (5x Periode, min. 300)."""
+    try:
+        data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=max(period * 5, 300))
+        if data is None or len(data) < period:
+            return None
+        ema = data['close'].ewm(span=period, adjust=False).mean()
+        return float(ema.iloc[-1])
+    except Exception:
+        return None
+
+
 def _pnl_str(entry_price, exit_price, side):
     """Berechnet PnL-Prozent als formatierten String."""
     try:
@@ -341,7 +355,8 @@ def _pnl_str(entry_price, exit_price, side):
 def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
                         entry_price: float = None, exit_price: float = None,
                         entry_side: str = None, sl_price: float = None,
-                        n_bricks: int = 60) -> str:
+                        n_bricks: int = 60, ema_value: float = None,
+                        ema_period: int = 100) -> str:
     """
     Zeichnet die letzten n_bricks EAR-Bricks als Renko-Chart (matplotlib PNG).
     Bricks kommen direkt aus _build_bricks mit persistiertem State — identisch zum Live-Bot.
@@ -384,11 +399,23 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
         ax.add_patch(rect)
 
     all_prices = [b['close'] for b in display_bricks]
+    if ema_value is not None:
+        all_prices = all_prices + [ema_value]
     y_min = min(all_prices)
     y_max = max(all_prices)
     margin = (y_max - y_min) * 0.15 or y_min * 0.01
     ax.set_xlim(-1, n)
     ax.set_ylim(y_min - margin, y_max + margin)
+
+    # EMA-Referenzlinie (nur zur Visualisierung, kein Einfluss auf die Handelslogik) --
+    # aktueller EMA-Wert als flache Linie, da der Chart brick-indiziert (nicht zeit-
+    # indiziert) ist und ein 100er-EMA sich ueber die kurze Zeitspanne eines einzelnen
+    # Trades ohnehin kaum bewegt.
+    if ema_value is not None:
+        ax.axhline(ema_value, color='#a78bfa', linewidth=1.0, linestyle='-.', zorder=3,
+                   label=f"EMA{ema_period} {ema_value:.6g}")
+        ax.text(-0.9, ema_value, f"EMA{ema_period}\n{ema_value:.6g}  ",
+                color='#a78bfa', fontsize=7.5, va='center', ha='right')
 
     # Entry-Linie
     if entry_price is not None:
@@ -441,16 +468,19 @@ def _generate_brick_png(bricks: list, symbol: str, timeframe: str,
 
 
 def _send_brick_chart(bricks, symbol, timeframe, entry_price, exit_price,
-                      entry_side, telegram_config, logger, sl_price=None, n_bricks=60):
+                      entry_side, telegram_config, logger, sl_price=None, n_bricks=60,
+                      ema_value=None, ema_period=100):
     """Generiert PNG und sendet es via Telegram. Loescht Temp-Datei danach.
 
     n_bricks=None zeigt alle Bricks (fuer Exit-Charts, die bereits ab Entry
-    anchoren) statt nur die letzten n_bricks (Default, fuer den Entry-Chart)."""
+    anchoren) statt nur die letzten n_bricks (Default, fuer den Entry-Chart).
+    ema_value: optionaler EMA-Referenzwert, rein zur Visualisierung."""
     if not telegram_config or not telegram_config.get('bot_token') or not telegram_config.get('chat_id'):
         return
     try:
         path = _generate_brick_png(bricks, symbol, timeframe, entry_price, exit_price,
-                                   entry_side, sl_price=sl_price, n_bricks=n_bricks)
+                                   entry_side, sl_price=sl_price, n_bricks=n_bricks,
+                                   ema_value=ema_value, ema_period=ema_period)
         if path and os.path.exists(path):
             send_photo(telegram_config['bot_token'], telegram_config['chat_id'], path)
             os.remove(path)
@@ -511,11 +541,12 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                         init_direction = 'up' if pos_side == 'long' else 'down'
                         bricks = engine._build_bricks(recent_data, init_lc=float(entry_price),
                                                       init_direction=init_direction)
+                        ema_value = _compute_ema(exchange, symbol, tf)
                         _send_brick_chart(bricks, symbol, tf,
                                           float(entry_price), float(exit_price), pos_side,
                                           telegram_config, logger,
                                           sl_price=float(sl_price) if sl_price else None,
-                                          n_bricks=None)
+                                          n_bricks=None, ema_value=ema_value)
             except Exception as chart_err:
                 logger.error(f"Chart-Erstellung (TP-Exit) fehlgeschlagen: {chart_err}", exc_info=True)
     except Exception as e:
@@ -741,9 +772,11 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             # Brick-Chart senden — aus der durchgehenden Kette (persistierter Teil + neue Bricks)
             chart_bricks = ([{'direction': d, 'close': c} for d, c in result['recent_before']]
                             + [{'direction': d, 'close': c} for _, d, c in result['new_bricks']])
+            ema_value = _compute_ema(exchange, symbol, timeframe)
             _send_brick_chart(chart_bricks, symbol, timeframe,
                               float(real_entry_price), None, entry_side_str,
-                              telegram_config, logger, sl_price=float(sl_price))
+                              telegram_config, logger, sl_price=float(sl_price),
+                              ema_value=ema_value)
 
         logger.info("Trade-Eröffnung erfolgreich. TP via Brick-Reversal-Check.")
 
@@ -814,13 +847,14 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
                     init_direction = 'up' if entry_side == 'long' else 'down'
                     bricks = engine._build_bricks(recent_data, init_lc=float(entry_price),
                                                   init_direction=init_direction)
+                    ema_value = _compute_ema(exchange, symbol, timeframe)
                     _send_brick_chart(bricks, symbol, timeframe,
                                       float(entry_price),
                                       float(exit_price) if exit_price else None,
                                       entry_side if entry_side in ('long', 'short') else None,
                                       telegram_config, logger,
                                       sl_price=float(sl_price) if sl_price else None,
-                                      n_bricks=None)
+                                      n_bricks=None, ema_value=ema_value)
             except Exception as chart_err:
                 logger.error(f"Chart-Erstellung (SL-Fired) fehlgeschlagen: {chart_err}", exc_info=True)
         elif params is None:
