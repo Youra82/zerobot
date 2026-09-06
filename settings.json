@@ -4,13 +4,8 @@
         "use_auto_optimizer_results": false,
         "active_strategies": [
             {
-                "symbol": "ADA/USDT:USDT",
-                "timeframe": "1h",
-                "active": true
-            },
-            {
-                "symbol": "ETH/USDT:USDT",
-                "timeframe": "1h",
+                "symbol": "DOT/USDT:USDT",
+                "timeframe": "2h",
                 "active": true
             },
             {
@@ -19,18 +14,28 @@
                 "active": true
             },
             {
-                "symbol": "LINK/USDT:USDT",
-                "timeframe": "1h",
+                "symbol": "ADA/USDT:USDT",
+                "timeframe": "2h",
                 "active": true
             },
             {
-                "symbol": "DOT/USDT:USDT",
+                "symbol": "SOL/USDT:USDT",
+                "timeframe": "2h",
+                "active": true
+            },
+            {
+                "symbol": "ARB/USDT:USDT",
                 "timeframe": "1h",
                 "active": true
             },
             {
                 "symbol": "BNB/USDT:USDT",
-                "timeframe": "1h",
+                "timeframe": "6h",
+                "active": true
+            },
+            {
+                "symbol": "LINK/USDT:USDT",
+                "timeframe": "2h",
                 "active": true
             }
         ]
@@ -41,8 +46,6 @@
     "optimization_settings": {
         "enabled": true,
         "backtest_lookback_weeks": 4,
-        "smoothing_step_days": 2,
-        "smoothing_samples": 7,
         "schedule": {
             "day_of_week": 6,
             "hour": 15,

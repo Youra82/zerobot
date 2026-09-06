@@ -1,31 +1,31 @@
 {
     "market": {
-        "symbol": "ADA/USDT:USDT",
+        "symbol": "SHIB/USDT:USDT",
         "timeframe": "2h",
         "htf": "1d"
     },
     "strategy": {
-        "base_pct": 0.009,
-        "k_entropy": 0.857,
-        "h_window": 14,
+        "base_pct": 0.0052,
+        "k_entropy": 0.714,
+        "h_window": 10,
         "trend_min_bricks": 2
     },
     "risk": {
         "margin_mode": "isolated",
-        "risk_per_trade_pct": 2.92,
-        "leverage": 7
+        "risk_per_trade_pct": 1.75,
+        "leverage": 20
     },
     "behavior": {
         "use_longs": true,
         "use_shorts": true
     },
     "_meta": {
-        "pnl_pct": 141423.55,
-        "optimized_at": "2026-06-11T21:06:39",
-        "train_start": "2023-03-01",
+        "pnl_pct": 175329587.5,
+        "optimized_at": "2026-09-06T18:37:45",
+        "train_start": "2024-02-29",
         "train_end": "2026-02-28",
         "oos_start": "2026-03-01",
         "oos_end": "2026-09-06",
-        "oos_pnl_pct": 1009.44
+        "oos_pnl_pct": 162.18
     }
 }

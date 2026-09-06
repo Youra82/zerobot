@@ -1,31 +1,31 @@
 {
     "market": {
-        "symbol": "AVAX/USDT:USDT",
+        "symbol": "SHIB/USDT:USDT",
         "timeframe": "1h",
         "htf": "4h"
     },
     "strategy": {
-        "base_pct": 0.0054,
-        "k_entropy": 1.255,
-        "h_window": 16,
+        "base_pct": 0.0059,
+        "k_entropy": 0.425,
+        "h_window": 20,
         "trend_min_bricks": 2
     },
     "risk": {
         "margin_mode": "isolated",
-        "risk_per_trade_pct": 2.94,
-        "leverage": 18
+        "risk_per_trade_pct": 1.28,
+        "leverage": 17
     },
     "behavior": {
         "use_longs": true,
         "use_shorts": true
     },
     "_meta": {
-        "pnl_pct": 57610754.08,
-        "optimized_at": "2026-06-11T19:23:11",
-        "train_start": "2023-03-01",
+        "pnl_pct": 227738871.82,
+        "optimized_at": "2026-09-06T19:38:59",
+        "train_start": "2024-02-29",
         "train_end": "2026-02-28",
         "oos_start": "2026-03-01",
         "oos_end": "2026-09-06",
-        "oos_pnl_pct": 97.75
+        "oos_pnl_pct": 480.34
     }
 }
