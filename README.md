@@ -865,7 +865,39 @@ Danach `./run_pipeline.sh` für einen kompletten Neustart ohne Vorwissen.
 
 ---
 
+## 🔎 Coin-Screening (bevor die Pipeline läuft)
+
+Bitget listet 700+ USDT-Perpetuals — jeden davon einzeln mit voller Optuna-Suche (`run_pipeline.sh`) zu testen, dauert pro Kombination mehrere Minuten bis Stunden. `screen_volatility.py` filtert vorab, welche Symbol/Timeframe-Kombinationen überhaupt vielversprechend sind, bevor man Zeit in die teure volle Pipeline investiert.
+
+Berechnet reine EAR-Brick-Kennzahlen (Brick-Aktivität, Entropie, Trend-Streak-Anteil, ATR-Volatilität, Signalhäufigkeit) über die **echte** `EAREngine` — keine eigene Näherung der Signal-Logik — für alle aktiven Bitget-USDT-Perpetuals und vergleicht sie mit dem Profil der aktuell **aktiven, bestätigten** Strategien aus `settings.json`. **Kein Backtest, kein Optuna** — nur Kerzendaten + die echte Brick-Konstruktion, daher Minuten statt Stunden für hunderte Symbole.
+
+Prüft zusätzlich, ob genug Kerzen-Historie für den vollen `run_pipeline.sh`-Lookback existiert (1h=548 Tage, 2h=730 Tage, 4h/6h=1095 Tage) — frisch gelistete Coins tauchen sonst als vielversprechend auf, scheitern aber in der vollen Pipeline mit "Keine historischen OHLCV-Daten gefunden". Solche Kandidaten werden aus der Top-30-Ausgabe ausgeblendet (bleiben aber, klar markiert, in der vollen CSV).
+
+```bash
+# Alle aktiven USDT-Perpetuals screenen (Standard-Timeframes 1h/2h/4h/6h)
+python screen_volatility.py
+
+# Nur die Top 100 nach 24h-Volumen, andere Timeframes, mehr/weniger parallele Worker
+python screen_volatility.py --top-n 100 --timeframes "1h 4h 6h" --workers 10
+
+# Längerer Vergleichszeitraum (Standard: 16 Wochen)
+python screen_volatility.py --lookback-weeks 26
+```
+
+Ergebnis: eine nach Ähnlichkeit sortierte Rangliste (`artifacts/results/screen_volatility.csv`) — Symbole mit der kleinsten `fit_distance` zum Profil der bestätigten Strategien sind die vielversprechendsten Kandidaten für den nächsten Schritt.
+
+### Empfohlener Workflow
+
+1. `screen_volatility.py` laufen lassen → Kandidatenliste sichten (CSV oder Konsolen-Ausgabe).
+2. Die vielversprechendsten ~5–15 Kandidaten (kleinste `fit_distance`) auswählen.
+3. Nur für diese gezielt `run_pipeline.sh` (volle Optuna-Optimierung) laufen lassen — Symbol/Timeframe direkt bei den interaktiven Prompts eingeben.
+4. Ergebnisse mit `show_results.sh` sichten, bevor eine neu bestätigte Config in `active_strategies` übernommen wird.
+
+---
+
 ## Coin & Timeframe Empfehlungen
+
+> **Hinweis:** Die folgende Tabelle ist eine ältere, manuell kuratierte Einschätzung. Für eine aktuelle, datenbasierte Einschätzung lieber `screen_volatility.py` (oben) laufen lassen statt sich auf diese Tabelle zu verlassen.
 
 ZeroBot ist eine **Renko-Strategie** — er baut Bricks aus dem ATR und sucht Trend- und Reversal-Muster. Benötigt: Coins mit klarer Richtungsbewegung und ausreichend historische Daten für den Optimizer.
 
