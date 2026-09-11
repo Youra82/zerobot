@@ -53,14 +53,18 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 
 ## Demo
 
-**[▶ ZeroBot in Motion](assets/demo.html)** — eine animierte Führung durch Idee, Installation, Optimierung, Live-Trading-Zyklus und einen echten Beispiel-Trade. Lokal herunterladen und im Browser öffnen (reines HTML, keine Installation nötig), oder direkt online: [claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea](https://claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea).
+![ZeroBot Demo](assets/demo.mp4)
 
-> Kein echtes Video/GIF (kann hier nicht aufgezeichnet werden) — stattdessen eine selbstständig abspielende, interaktive Seite (Pfeiltasten/Klick zum Navigieren, Pause-Button). Ein echter Screen-Recording-Clip wäre trotzdem wertvoll, z. B. von:
+Ein 2:38-minütiges, vollständig vertontes Erklärvideo (deutsche Sprachausgabe) durch Idee, Installation, Optimierung, Live-Trading-Zyklus und einen echten Beispiel-Trade — `assets/demo.mp4`. Programmatisch erzeugt (Python/PIL-Frames + Windows-Sprachsynthese + ffmpeg), kein Screen-Recording.
+
+Zusätzlich als interaktive, selbstständig abspielende Web-Seite: **[▶ ZeroBot in Motion](assets/demo.html)** (Pfeiltasten/Klick zum Navigieren, Pause-Button) — lokal im Browser öffnen oder online: [claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea](https://claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea).
+
+> Ein echter Screen-Recording-Clip von der Live-Umgebung wäre trotzdem wertvoll, z. B. von:
 > 1. Einem `master_runner.py`-Zyklus im Terminal (`.venv/bin/python3 master_runner.py`) — zeigt Brick-Berechnung, Signalprüfung, ggf. Order-Platzierung.
 > 2. Einer Telegram-Signal-Benachrichtigung inkl. Brick-Chart (`show_live_charts.py`).
 > 3. Einem Brick-Sync-Alarm mit anschließender automatischer Korrektur (`check_brick_sync.py`).
 >
-> Aufnahme z. B. per OBS oder Terminal-Recorder (z. B. [VHS](https://github.com/charmbracelet/vhs)), als `.gif` oder `.mp4` unter `assets/demo.gif` ablegen und einbetten: `![ZeroBot Demo](assets/demo.gif)`
+> Aufnahme z. B. per OBS oder Terminal-Recorder (z. B. [VHS](https://github.com/charmbracelet/vhs)), als `.mp4` unter `assets/demo_live.mp4` ablegen und einbetten: `![ZeroBot Live](assets/demo_live.mp4)`
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 
