@@ -34,7 +34,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message, send_photo
-from master_runner import _add_orphaned_open_positions
+from zerobot.utils.strategy_list import add_orphaned_open_positions as _add_orphaned_open_positions
 
 DB_PATH        = os.path.join(PROJECT_ROOT, 'artifacts', 'db')
 OHLCV_CACHE    = os.path.join(DB_PATH, 'brick_sync_cache')
