@@ -793,6 +793,14 @@ tail -n 200 logs/cron.log
 cd ~/zerobot && .venv/bin/python3 master_runner.py
 ```
 
+#### Brick-Sync-Check manuell prüfen (Trockenlauf)
+
+Vergleicht die live persistierte EAR-Brick-Kette jedes aktiven Symbols gegen eine frisch aus Kursdaten gebaute Referenzkette, ohne Telegram-Nachrichten zu senden oder etwas zu korrigieren — nur Logging. Läuft normalerweise automatisch bei jedem `master_runner.py`-Zyklus mit (kein eigener Cronjob nötig).
+
+```bash
+cd /home/matola/zerobot && .venv/bin/python3 check_brick_sync.py --dry-run
+```
+
 #### Tests ausführen (vor dem ersten Live-Betrieb)
 
 ```bash
