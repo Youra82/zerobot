@@ -53,15 +53,14 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 
 ## Demo
 
-> 📹 **Platz für ein Demo-Video.** Am aussagekräftigsten wäre eine kurze Aufnahme (30–60s) von einem der folgenden Abläufe, mit Sprech- oder Textkommentar:
-> 1. Ein `master_runner.py`-Zyklus im Terminal (`.venv/bin/python3 master_runner.py`) — zeigt Brick-Berechnung, Signalprüfung, ggf. Order-Platzierung.
-> 2. Eine Telegram-Signal-Benachrichtigung inkl. Brick-Chart (`show_live_charts.py`).
-> 3. Ein Brick-Sync-Alarm mit anschließender automatischer Korrektur (`check_brick_sync.py`).
+**[▶ ZeroBot in Motion](assets/demo.html)** — eine animierte Führung durch Idee, Installation, Optimierung, Live-Trading-Zyklus und einen echten Beispiel-Trade. Lokal herunterladen und im Browser öffnen (reines HTML, keine Installation nötig), oder direkt online: [claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea](https://claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea).
+
+> Kein echtes Video/GIF (kann hier nicht aufgezeichnet werden) — stattdessen eine selbstständig abspielende, interaktive Seite (Pfeiltasten/Klick zum Navigieren, Pause-Button). Ein echter Screen-Recording-Clip wäre trotzdem wertvoll, z. B. von:
+> 1. Einem `master_runner.py`-Zyklus im Terminal (`.venv/bin/python3 master_runner.py`) — zeigt Brick-Berechnung, Signalprüfung, ggf. Order-Platzierung.
+> 2. Einer Telegram-Signal-Benachrichtigung inkl. Brick-Chart (`show_live_charts.py`).
+> 3. Einem Brick-Sync-Alarm mit anschließender automatischer Korrektur (`check_brick_sync.py`).
 >
-> Aufnahme z. B. per OBS oder Terminal-Recorder (z. B. [VHS](https://github.com/charmbracelet/vhs)), als `.gif` oder `.mp4` unter `assets/demo.gif` ablegen und hier einbetten:
-> ```markdown
-> ![ZeroBot Demo](assets/demo.gif)
-> ```
+> Aufnahme z. B. per OBS oder Terminal-Recorder (z. B. [VHS](https://github.com/charmbracelet/vhs)), als `.gif` oder `.mp4` unter `assets/demo.gif` ablegen und einbetten: `![ZeroBot Demo](assets/demo.gif)`
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 

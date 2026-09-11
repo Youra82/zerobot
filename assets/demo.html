@@ -1,0 +1,554 @@
+<title>ZeroBot in Motion</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg:#0d1117;
+    --panel:#131a24;
+    --panel-2:#0f151d;
+    --ink:#e6e6e6;
+    --ink-dim:#8b95a1;
+    --up:#26a69a;
+    --down:#ef5350;
+    --gold:#ffd700;
+    --violet:#a78bfa;
+    --border:#2a3a4a;
+    --grid:#1e2a3a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column; }
+
+  /* ---------- progress bar ---------- */
+  #progress{
+    display:flex; gap:6px;
+    padding:16px clamp(16px,4vw,32px) 0;
+  }
+  .seg{ flex:1; height:3px; background:rgba(255,255,255,0.14); border-radius:2px; overflow:hidden; cursor:pointer; }
+  .seg-fill{ height:100%; width:0%; background:var(--gold); transform-origin:left; }
+  .seg-fill.done{ width:100%; }
+  .seg-fill.active{ animation-name:fillbar; animation-timing-function:linear; animation-fill-mode:forwards; }
+  @keyframes fillbar{ from{ width:0%; } to{ width:100%; } }
+
+  /* ---------- header row ---------- */
+  #topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px clamp(16px,4vw,32px) 0;
+  }
+  #brand{ font-family:var(--mono); font-weight:600; letter-spacing:.02em; font-size:.95rem; color:var(--ink-dim); }
+  #brand b{ color:var(--ink); }
+  #scenename{ font-family:var(--mono); font-size:.8rem; color:var(--ink-dim); }
+
+  /* ---------- stage ---------- */
+  #stage{ position:relative; flex:1; min-height:0; }
+  .scene{
+    position:absolute; inset:0;
+    display:none;
+    padding:clamp(16px,5vw,64px);
+    align-items:center; justify-content:center;
+  }
+  .scene.active{ display:flex; }
+  .scene-inner{ width:100%; max-width:920px; margin:0 auto; }
+
+  h1,h2{ text-wrap:balance; margin:0 0 .5em; }
+  .eyebrow{
+    font-family:var(--mono); font-size:.78rem; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--gold); margin:0 0 .9em;
+  }
+  .lede{ color:var(--ink-dim); font-size:clamp(.95rem,2vw,1.1rem); max-width:60ch; line-height:1.55; }
+
+  /* click zones */
+  .navzone{ position:absolute; top:0; bottom:0; width:35%; z-index:5; cursor:pointer; }
+  #zone-prev{ left:0; }
+  #zone-next{ right:0; }
+
+  /* ---------- controls ---------- */
+  #controls{
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    padding:10px clamp(16px,4vw,32px) clamp(16px,4vw,28px);
+  }
+  .ctrlbtn{
+    font-family:var(--mono); font-size:.85rem;
+    background:var(--panel); color:var(--ink); border:1px solid var(--border);
+    border-radius:8px; padding:8px 14px; cursor:pointer;
+  }
+  .ctrlbtn:hover{ border-color:var(--gold); color:var(--gold); }
+  #dots{ display:flex; gap:8px; }
+  .dot{ width:6px; height:6px; border-radius:50%; background:var(--border); cursor:pointer; }
+  .dot.on{ background:var(--gold); }
+
+  /* ---------- HERO ---------- */
+  #scene-hero{ text-align:center; }
+  #hero-bricks{ position:absolute; inset:0; display:flex; align-items:flex-end; justify-content:center; gap:6px; opacity:.16; pointer-events:none; padding-bottom:8%; }
+  .hbrick{ width:22px; border-radius:2px; opacity:0; transform:translateY(10px); animation:hbrickIn .5s ease forwards; }
+  @keyframes hbrickIn{ to{ opacity:1; transform:translateY(0); } }
+  #hero-title{ font-family:var(--mono); font-weight:700; font-size:clamp(3rem,10vw,6rem); letter-spacing:-.02em; margin:0; }
+  #hero-sub{ font-family:var(--sans); font-size:clamp(1rem,2.4vw,1.35rem); color:var(--ink-dim); margin-top:.4em; }
+  #hero-tags{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:1.6em; }
+  .tag{ font-family:var(--mono); font-size:.75rem; border:1px solid var(--border); color:var(--ink-dim); padding:5px 12px; border-radius:999px; }
+
+  /* ---------- CONCEPT ---------- */
+  .formula{
+    font-family:var(--mono); font-size:clamp(.85rem,1.8vw,1.05rem);
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px 18px; color:var(--gold); margin:1.2em 0; display:inline-block;
+  }
+  .compare{ display:flex; gap:28px; margin-top:1.6em; flex-wrap:wrap; }
+  .compare-col{ flex:1; min-width:220px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .compare-col h3{ font-family:var(--mono); font-size:.85rem; color:var(--ink-dim); font-weight:500; margin:0 0 10px; text-transform:uppercase; letter-spacing:.06em; }
+  .minichart{ display:flex; align-items:flex-end; gap:4px; height:90px; }
+  .mbrick{ flex:1; border-radius:2px; opacity:0; animation:hbrickIn .35s ease forwards; }
+  .compare-cap{ font-size:.75rem; color:var(--ink-dim); margin-top:8px; font-family:var(--mono); }
+
+  /* ---------- TERMINAL ---------- */
+  .term{
+    background:var(--panel-2); border:1px solid var(--border); border-radius:12px;
+    font-family:var(--mono); font-size:clamp(.8rem,1.7vw,.95rem); line-height:1.9;
+    padding:18px 20px; min-height:190px; box-shadow:0 20px 60px -20px rgba(0,0,0,.6);
+  }
+  .term-head{ display:flex; gap:6px; margin-bottom:10px; }
+  .term-dot{ width:10px; height:10px; border-radius:50%; }
+  .term-dot.r{ background:#ef5350; } .term-dot.y{ background:#f5c542; } .term-dot.g{ background:#26a69a; }
+  .term-line{ white-space:pre-wrap; word-break:break-word; }
+  .prompt{ color:var(--up); }
+  .out{ color:var(--ink-dim); }
+  .ok{ color:var(--up); }
+  .cursor{ display:inline-block; width:8px; height:1em; background:var(--gold); vertical-align:text-bottom; animation:blink 1s step-end infinite; }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  /* ---------- OPTIMIZER ---------- */
+  .opt-grid{ display:flex; gap:24px; flex-wrap:wrap; margin-top:1.4em; }
+  .opt-card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px; flex:1; min-width:220px; }
+  .opt-num{ font-family:var(--mono); font-size:clamp(1.8rem,5vw,2.6rem); color:var(--gold); font-variant-numeric:tabular-nums; }
+  .opt-label{ font-size:.78rem; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.06em; margin-top:4px; }
+  .constraints{ margin-top:1.4em; font-family:var(--mono); font-size:.85rem; color:var(--ink-dim); }
+  .constraints span{ color:var(--ink); }
+
+  /* ---------- LIVE CYCLE ---------- */
+  .cycle{ display:flex; flex-direction:column; gap:10px; margin-top:1.4em; }
+  .cyc-step{ display:flex; align-items:center; gap:12px; opacity:.25; transition:opacity .25s ease; font-family:var(--mono); font-size:.9rem; }
+  .cyc-step.on{ opacity:1; }
+  .cyc-dot{ width:9px; height:9px; border-radius:50%; background:var(--border); flex:none; }
+  .cyc-step.on .cyc-dot{ background:var(--gold); }
+  .clock{ font-family:var(--mono); color:var(--ink-dim); font-size:.8rem; margin-top:1.2em; }
+
+  /* ---------- TRADE CHART ---------- */
+  #chartwrap{ margin-top:1.2em; background:var(--panel-2); border:1px solid var(--border); border-radius:12px; padding:20px 20px 14px; }
+  #chart{ position:relative; height:260px; }
+  .brick{ position:absolute; width:26px; border-radius:2px; opacity:0; animation:hbrickIn .35s ease forwards; }
+  .hline{ position:absolute; left:0; right:0; height:0; border-top:2px dashed; opacity:0; }
+  .hline.show{ opacity:1; }
+  .hline-label{ position:absolute; right:0; transform:translateY(-50%); font-family:var(--mono); font-size:.72rem; text-align:right; opacity:0; }
+  .hline-label.show{ opacity:1; }
+  .legend{ display:flex; gap:18px; margin-top:12px; font-family:var(--mono); font-size:.78rem; color:var(--ink-dim); flex-wrap:wrap; }
+  .legend b{ color:var(--ink); }
+
+  /* ---------- OUTRO ---------- */
+  #scene-outro{ text-align:center; }
+  .cta{ position:relative; z-index:10; display:inline-flex; align-items:center; gap:8px; margin-top:1.6em; font-family:var(--mono); font-size:.9rem; color:var(--bg); background:var(--gold); padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:600; }
+  .term-inline{ font-family:var(--mono); font-size:.9em; background:var(--panel); border:1px solid var(--border); border-radius:5px; padding:1px 7px; color:var(--gold); }
+  .disclaimer{ margin-top:2em; font-size:.78rem; color:var(--ink-dim); max-width:50ch; margin-left:auto; margin-right:auto; }
+
+  @media (max-width:640px){
+    .compare{ flex-direction:column; }
+    #hero-title{ font-size:clamp(2.4rem,14vw,4rem); }
+  }
+  @media (prefers-reduced-motion:reduce){
+    .hbrick,.mbrick,.brick{ animation:none !important; opacity:1 !important; transform:none !important; }
+  }
+</style>
+
+<div id="app">
+  <div id="progress"></div>
+  <div id="topbar">
+    <div id="brand">ZERO<b>BOT</b> · in motion</div>
+    <div id="scenename"></div>
+  </div>
+
+  <div id="stage">
+    <div class="navzone" id="zone-prev" aria-label="Zurück"></div>
+    <div class="navzone" id="zone-next" aria-label="Weiter"></div>
+
+    <section class="scene" id="scene-hero">
+      <div id="hero-bricks"></div>
+      <div class="scene-inner">
+        <h1 id="hero-title">ZeroBot</h1>
+        <div id="hero-sub">Entropy-Adaptive Renko — ein quantitativer Trading-Bot für Bitget Futures</div>
+        <div id="hero-tags">
+          <span class="tag">EAR-Strategie</span>
+          <span class="tag">Optuna-optimiert</span>
+          <span class="tag">Bitget Futures</span>
+          <span class="tag">Telegram-Alerts</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-concept">
+      <div class="scene-inner">
+        <div class="eyebrow">01 — Die Idee</div>
+        <h2>Renko ohne Zeit-Rauschen</h2>
+        <p class="lede">Ein neuer Brick entsteht erst, wenn sich der Kurs um einen definierten Betrag bewegt hat — nicht nach fester Zeit. EAR macht diese Brick-Größe zusätzlich abhängig von der Markt-Entropie.</p>
+        <div class="formula">Brick&nbsp;=&nbsp;close&nbsp;×&nbsp;base_pct&nbsp;×&nbsp;(1&nbsp;+&nbsp;k_entropy&nbsp;×&nbsp;H_rolling)</div>
+        <div class="compare">
+          <div class="compare-col">
+            <h3>Ruhiger Markt</h3>
+            <div class="minichart" id="mini-calm"></div>
+            <div class="compare-cap">kleine Bricks (schematisch)</div>
+          </div>
+          <div class="compare-col">
+            <h3>Volatiler Markt</h3>
+            <div class="minichart" id="mini-vol"></div>
+            <div class="compare-cap">große Bricks (schematisch)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-install">
+      <div class="scene-inner">
+        <div class="eyebrow">02 — Installation</div>
+        <h2>Drei Schritte auf dem Server</h2>
+        <div class="term" id="term-install">
+          <div class="term-head"><span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span></div>
+          <div id="term-install-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-optimize">
+      <div class="scene-inner">
+        <div class="eyebrow">03 — Optimierung</div>
+        <h2>Optuna sucht die Parameter</h2>
+        <p class="lede"><span class="term-inline">./run_pipeline.sh</span> — pro Symbol/Timeframe wird die Kombination aus Brick-Größe, Entropie-Gewichtung, SL/TP und Hebel gesucht, die die Constraints erfüllt.</p>
+        <div class="opt-grid">
+          <div class="opt-card"><div class="opt-num" id="trial-num">0</div><div class="opt-label">Trial / 200</div></div>
+          <div class="opt-card"><div class="opt-num" id="best-status">–</div><div class="opt-label">beste Config</div></div>
+        </div>
+        <div class="constraints">Constraints: <span>MaxDD ≤ Limit</span> · <span>WinRate ≥ Minimum</span> · <span>Trades ≥ 15</span></div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-live">
+      <div class="scene-inner">
+        <div class="eyebrow">04 — Live-Trading</div>
+        <h2>Jeder Zyklus, alle 15 Minuten</h2>
+        <div class="cycle" id="cycle-steps">
+          <div class="cyc-step"><span class="cyc-dot"></span>Aktuelle Kerzen laden</div>
+          <div class="cyc-step"><span class="cyc-dot"></span>EAR-Bricks berechnen (Entropie-adaptiv)</div>
+          <div class="cyc-step"><span class="cyc-dot"></span>Signal prüfen: Trend- + Gegen-Bricks</div>
+          <div class="cyc-step"><span class="cyc-dot"></span>Entry per Trigger-Limit-Order</div>
+          <div class="cyc-step"><span class="cyc-dot"></span>SL = ATR × Multiplikator</div>
+          <div class="cyc-step"><span class="cyc-dot"></span>TP = erster Gegenbrick (kein fixer Preis)</div>
+        </div>
+        <div class="clock">*/15 * * * * master_runner.py</div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-trade">
+      <div class="scene-inner">
+        <div class="eyebrow">05 — Ein echter Trade</div>
+        <h2>SOL/USDT:USDT · 4h · LONG</h2>
+        <div id="chartwrap">
+          <div id="chart"></div>
+          <div class="legend">
+            <div><b>Entry</b> 149.38</div>
+            <div><b>SL</b> 146.50</div>
+            <div><b>Exit</b> 154.42 (erster Gegenbrick)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-outro">
+      <div class="scene-inner">
+        <h2>Bricks statt Zeit-Rauschen.</h2>
+        <p class="lede" style="margin:0 auto;">Optuna-optimiert, Out-of-Sample validiert, mit automatischer Live-Überwachung der Brick-Ketten.</p>
+        <a class="cta" href="https://github.com/Youra82/zerobot" target="_blank" rel="noopener">github.com/Youra82/zerobot ↗</a>
+        <div class="disclaimer">Experimentell, ausschließlich für Forschungszwecke. Der Handel mit Kryptowährungen birgt erhebliche finanzielle Risiken. Nutzung auf eigene Gefahr.</div>
+      </div>
+    </section>
+  </div>
+
+  <div id="controls">
+    <button class="ctrlbtn" id="btn-play">⏸ Pause</button>
+    <div id="dots"></div>
+    <button class="ctrlbtn" id="btn-replay">↺ Von vorn</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var SCENES = [
+    { id:'scene-hero',     name:'Intro',        dur:5000,  init:initHero },
+    { id:'scene-concept',  name:'Die Idee',     dur:7000,  init:initConcept },
+    { id:'scene-install',  name:'Installation', dur:9000,  init:initInstall },
+    { id:'scene-optimize', name:'Optimierung',  dur:7000,  init:initOptimize },
+    { id:'scene-live',     name:'Live-Trading', dur:8000,  init:initLive },
+    { id:'scene-trade',    name:'Ein Trade',    dur:9000,  init:initTrade },
+    { id:'scene-outro',    name:'Fazit',        dur:999999, init:function(){} }
+  ];
+
+  var idx = 0, playing = true;
+  var progressEl = document.getElementById('progress');
+  var dotsEl = document.getElementById('dots');
+  var sceneNameEl = document.getElementById('scenename');
+
+  SCENES.forEach(function(s, i){
+    var seg = document.createElement('div');
+    seg.className = 'seg';
+    seg.innerHTML = '<div class="seg-fill"></div>';
+    seg.addEventListener('click', function(){ goTo(i); });
+    progressEl.appendChild(seg);
+
+    var dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.addEventListener('click', function(){ goTo(i); });
+    dotsEl.appendChild(dot);
+  });
+
+  function segFills(){ return progressEl.querySelectorAll('.seg-fill'); }
+  function dots(){ return dotsEl.querySelectorAll('.dot'); }
+
+  function clearTimers(){
+    var fills = segFills();
+    for (var i=0;i<fills.length;i++){
+      fills[i].style.animation = 'none';
+      fills[i].classList.remove('active');
+    }
+  }
+
+  function render(){
+    document.querySelectorAll('.scene').forEach(function(el){ el.classList.remove('active'); });
+    document.getElementById(SCENES[idx].id).classList.add('active');
+    sceneNameEl.textContent = String(idx+1).padStart(2,'0') + ' / ' + SCENES.length + '  ' + SCENES[idx].name;
+
+    var fills = segFills();
+    fills.forEach(function(f, i){
+      f.style.animation = 'none';
+      f.classList.remove('active','done');
+      if (i < idx) { f.classList.add('done'); }
+      f.style.width = i < idx ? '100%' : '0%';
+    });
+
+    var ds = dots();
+    ds.forEach(function(d,i){ d.classList.toggle('on', i===idx); });
+
+    // restart scene content
+    SCENES[idx].init();
+
+    // kick off progress fill
+    var fill = fills[idx];
+    void fill.offsetWidth; // reflow
+    fill.style.animationDuration = SCENES[idx].dur + 'ms';
+    fill.classList.add('active');
+    fill.style.animationPlayState = playing ? 'running' : 'paused';
+
+    fill.onanimationend = function(){ next(); };
+  }
+
+  function goTo(i){
+    idx = Math.max(0, Math.min(SCENES.length-1, i));
+    render();
+  }
+  function next(){ goTo((idx+1) % SCENES.length); }
+  function prev(){ goTo((idx-1+SCENES.length) % SCENES.length); }
+
+  document.getElementById('zone-prev').addEventListener('click', prev);
+  document.getElementById('zone-next').addEventListener('click', next);
+
+  var btnPlay = document.getElementById('btn-play');
+  btnPlay.addEventListener('click', function(){
+    playing = !playing;
+    btnPlay.textContent = playing ? '⏸ Pause' : '▶ Weiter';
+    var fills = segFills();
+    fills[idx].style.animationPlayState = playing ? 'running' : 'paused';
+  });
+
+  document.getElementById('btn-replay').addEventListener('click', function(){ goTo(0); });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowRight') next();
+    else if (e.key === 'ArrowLeft') prev();
+    else if (e.key === ' ') { e.preventDefault(); btnPlay.click(); }
+  });
+
+  // ---------------- scene init functions ----------------
+
+  function initHero(){
+    var wrap = document.getElementById('hero-bricks');
+    wrap.innerHTML = '';
+    var heights = [30,45,25,60,38,52,28,70,40,55,32,48];
+    var colors = [true,true,false,true,false,true,true,false,true,false,true,false];
+    heights.forEach(function(h,i){
+      var b = document.createElement('div');
+      b.className = 'hbrick';
+      b.style.height = h + 'px';
+      b.style.background = colors[i] ? 'var(--up)' : 'var(--down)';
+      b.style.animationDelay = (i*0.12) + 's';
+      wrap.appendChild(b);
+    });
+  }
+
+  function initConcept(){
+    buildMini('mini-calm', [8,14,10,18,12,16], 'var(--up)','var(--down)');
+    buildMini('mini-vol', [30,55,20,68,38,60], 'var(--up)','var(--down)');
+  }
+  function buildMini(id, heights, upC, downC){
+    var el = document.getElementById(id);
+    el.innerHTML = '';
+    heights.forEach(function(h,i){
+      var b = document.createElement('div');
+      b.className = 'mbrick';
+      b.style.height = h + 'px';
+      b.style.background = (i%2===0) ? upC : downC;
+      b.style.animationDelay = (i*0.1) + 's';
+      el.appendChild(b);
+    });
+  }
+
+  function initInstall(){
+    var body = document.getElementById('term-install-body');
+    body.innerHTML = '';
+    var lines = [
+      { t:'$ git clone https://github.com/Youra82/zerobot.git', cls:'prompt' },
+      { t:'$ cd zerobot && bash install.sh', cls:'prompt' },
+      { t:'✓ venv erstellt · Abhängigkeiten installiert · Verzeichnisse angelegt', cls:'ok' },
+      { t:'$ nano secret.json', cls:'prompt' },
+      { t:'→ Bitget API-Key/Secret + Telegram-Bot-Token eintragen', cls:'out' }
+    ];
+    typeLines(body, lines);
+  }
+
+  function typeLines(container, lines){
+    var li = 0;
+    function typeLine(){
+      if (li >= lines.length) return;
+      var lineEl = document.createElement('div');
+      lineEl.className = 'term-line ' + lines[li].cls;
+      container.appendChild(lineEl);
+      var text = lines[li].t, ci = 0;
+      var cursor = document.createElement('span');
+      cursor.className = 'cursor';
+      function typeChar(){
+        if (reduceMotion) {
+          lineEl.textContent = text;
+          li++;
+          setTimeout(typeLine, 60);
+          return;
+        }
+        if (ci <= text.length){
+          lineEl.textContent = text.slice(0, ci);
+          lineEl.appendChild(cursor);
+          ci++;
+          setTimeout(typeChar, 14);
+        } else {
+          cursor.remove();
+          li++;
+          setTimeout(typeLine, 220);
+        }
+      }
+      typeChar();
+    }
+    typeLine();
+  }
+
+  var optTimer = null;
+  function initOptimize(){
+    clearInterval(optTimer);
+    var numEl = document.getElementById('trial-num');
+    var statusEl = document.getElementById('best-status');
+    numEl.textContent = '0';
+    statusEl.textContent = '–';
+    var n = 0;
+    optTimer = setInterval(function(){
+      n += Math.ceil(Math.random()*14)+4;
+      if (n >= 200){ n = 200; clearInterval(optTimer); statusEl.textContent = 'gespeichert ✓'; }
+      numEl.textContent = n;
+    }, reduceMotion ? 400 : 90);
+  }
+
+  function initLive(){
+    var steps = document.querySelectorAll('#cycle-steps .cyc-step');
+    steps.forEach(function(s){ s.classList.remove('on'); });
+    steps.forEach(function(s, i){
+      setTimeout(function(){ s.classList.add('on'); }, i * (reduceMotion?150:650));
+    });
+  }
+
+  var tradeTimer = null;
+  function initTrade(){
+    clearTimeout(tradeTimer);
+    var el = document.getElementById('chart');
+    el.innerHTML = '';
+    var seq = [
+      ['down',150.10],['down',149.38],['down',148.66],['down',147.94],['down',147.22],
+      ['up',147.94],['up',148.66],['up',149.38],
+      ['up',150.10],['up',150.82],['up',151.54],['up',152.26],
+      ['up',152.98],['up',153.70],['up',154.42],['up',155.14],
+      ['down',154.42]
+    ];
+    var entryIdx = 7, exitIdx = 16;
+    var prices = seq.map(function(s){ return s[1]; });
+    var min = Math.min.apply(null, prices), max = Math.max.apply(null, prices);
+    var pad = (max-min) * 0.15;
+    min -= pad; max += pad;
+    var h = el.clientHeight || 260;
+    function y(p){ return h - ((p-min)/(max-min))*h; }
+
+    var entryLine = mkLine('var(--gold)', y(149.38), 'Entry 149.38', 'var(--gold)');
+    var slLine = mkLine('var(--down)', y(146.50), 'SL 146.50', 'var(--down)');
+    el.appendChild(entryLine.line); el.appendChild(entryLine.label);
+    el.appendChild(slLine.line); el.appendChild(slLine.label);
+
+    var w = 30, gap = 10, x0 = 6;
+    seq.forEach(function(b, i){
+      var prevClose = i>0 ? seq[i-1][1] : b[1];
+      var top = y(Math.max(prevClose, b[1]));
+      var bot = y(Math.min(prevClose, b[1]));
+      var brick = document.createElement('div');
+      brick.className = 'brick';
+      brick.style.left = (x0 + i*(w+gap)) + 'px';
+      brick.style.top = top + 'px';
+      brick.style.height = Math.max(2, bot-top) + 'px';
+      brick.style.background = b[0]==='up' ? 'var(--up)' : 'var(--down)';
+      brick.style.animationDelay = (i * (reduceMotion?0.05:0.32)) + 's';
+      el.appendChild(brick);
+    });
+
+    var revealDelay = (reduceMotion ? entryIdx*0.05 : entryIdx*0.32) * 1000 + 300;
+    tradeTimer = setTimeout(function(){
+      entryLine.line.classList.add('show'); entryLine.label.classList.add('show');
+      slLine.line.classList.add('show'); slLine.label.classList.add('show');
+    }, revealDelay);
+  }
+  function mkLine(color, top, label, labelColor){
+    var line = document.createElement('div');
+    line.className = 'hline';
+    line.style.borderColor = color;
+    line.style.top = top + 'px';
+    var lab = document.createElement('div');
+    lab.className = 'hline-label';
+    lab.style.top = top + 'px';
+    lab.style.color = labelColor;
+    lab.textContent = label;
+    return { line:line, label:lab };
+  }
+
+  render();
+})();
+</script>
