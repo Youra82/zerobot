@@ -106,6 +106,10 @@ def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
 
     df = df[df.index >= cutoff]
     if not df.empty:
+        df.index.name = 'ts'  # exchange.py's fetch_* nennen den Index 'timestamp' --
+                              # hier fest auf 'ts' normalisiert, damit Schreiben (hier)
+                              # und Lesen (index_col='ts' oben) garantiert zusammenpassen,
+                              # unabhaengig davon wie die jeweilige Fetch-Funktion benennt.
         df.to_csv(cache_file)
     return df
 
