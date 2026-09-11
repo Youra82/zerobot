@@ -1,11 +1,21 @@
 # check_brick_sync.py
 """
 Vergleicht fuer jedes aktive Symbol die live persistierte EAR-Brick-Kette
-(artifacts/db/ear_brick_state_*.json) gegen eine frisch, nie neu verankerte
-Referenzkette aus den letzten ROLLING_WINDOW_DAYS Tagen Kursdaten (exakt wie
-_bootstrap_brick_chain/backtester._build_bricks, nur mit rollierendem statt
-festem Warmup-Start -- Renko/EAR-Ketten sind stark pfadabhaengig und
-akkumulieren Drift ueber Wochen, siehe research_zerobot_live_vs_backtest_2026_09).
+(artifacts/db/ear_brick_state_*.json) gegen eine frisch gebaute Referenzkette
+-- durchgehend ab dem ECHTEN _meta.train_start der Config, nie neu verankert,
+strukturell identisch zu backtester.py/_bootstrap_brick_chain.
+
+WICHTIG (2026-09-11, nach einem echten Fehlalarm bei ADA/BNB korrigiert):
+Eine fruehere Version baute die Referenz nur aus den letzten 100 Tagen
+Kursdaten (rollierend), in der Annahme das sei "genug fuer Konvergenz" bei
+pfadabhaengigen Renko/EAR-Ketten. Das war FALSCH -- an zwei echten Live-Faellen
+(ADA, BNB) nachweisbar: die 100-Tage-Referenz zeigte die falsche Richtung,
+waehrend die Live-Kette (durchgehend seit train_start) mit einer unabhaengig
+ab train_start neu gebauten Kette uebereinstimmte. Die 100-Tage-Naeherung
+wurde dadurch selbst zur Fehlerquelle und hat echte, korrekte Live-Ketten
+faelschlich "korrigiert". Der Ersatz-Aufwand (einmaliger Voll-Fetch pro
+Symbol, danach nur noch inkrementelles Nachladen aus einem lokalen Cache)
+ist der Preis fuer eine tatsaechlich vertrauenswuerdige Referenz.
 
 Bei Richtungs-Abweichung (das kritische Signal -- Live und Referenz zeigen
 entgegengesetzten Trend):
@@ -46,8 +56,9 @@ CONFIGS_DIR    = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'confi
 RESULTS_FILE   = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'optimization_results.json')
 PENDING_PREFIX = os.path.join(DB_PATH, 'brick_sync_pending_')
 
-ROLLING_WINDOW_DAYS = 100   # Referenzketten-Warmup -- genug fuer Konvergenz,
-                            # klein genug fuer schnelles, wiederholtes Neuladen
+STALE_CACHE_SLACK_DAYS = 2  # wie weit die aelteste gecachte Kerze maximal nach
+                            # train_start liegen darf, bevor der Cache als
+                            # unvollstaendig verworfen und komplett neu geladen wird
 
 
 def setup_logging():
@@ -68,27 +79,32 @@ def setup_logging():
     return logger
 
 
-def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
-    """Rollierender lokaler Cache (eigenstaendig von backtester.load_data,
-    damit ein 'heute' als Endzeitpunkt nicht bei jedem Lauf einen vollen
-    Jahre-Refetch ausloest -- nur die neuesten Kerzen kommen bei jedem Lauf dazu.
+def load_full_ohlcv(exchange, symbol, timeframe, train_start, logger):
+    """Lokaler Cache der VOLLEN Historie ab train_start (kein rollierendes
+    Fenster mehr) -- beim ersten Lauf pro Symbol ein voller Fetch (dauert je
+    nach Timeframe/Symbol ca. 20-35s), danach nur noch inkrementelles
+    Nachladen der seit dem letzten Lauf neu hinzugekommenen Kerzen, genau wie
+    backtester.load_data das fuer die Pipeline tut.
 
     Nutzt bewusst fetch_historical_ohlcv (nicht fetch_ohlcv_since): Live
-    verifiziert (2026-09-11) liefert Bitget fuer eine grosse Zeitspanne (hier:
-    100 Tage) auf der allerersten Page still nur ~199 statt 200 Kerzen (deckt
-    nur ~8 Tage ab, KEIN Fehler/leere Antwort) -- fetch_ohlcv_since wertet
-    'batch kuerzer als angefordert' faelschlich als 'Ende der Historie' und
-    bricht sofort ab (das ist fuer seinen eigentlichen Zweck, kleine
-    Live-Cron-Nachlade-Haeppchen, unproblematisch, aber genau falsch fuer
-    einen grossen Warmup-Fetch). fetch_historical_ohlcv hat diese Annahme
-    nicht (paged bis end_ts erreicht ist, unabhaengig von der Page-Groesse)
-    und ist bereits an anderer Stelle im Projekt fuer genau diesen Fall
-    (grosser Bootstrap-Fetch) verifiziert -- siehe _bootstrap_brick_chain."""
+    verifiziert (2026-09-11) liefert Bitget fuer eine grosse Zeitspanne auf
+    der allerersten Page still weniger Kerzen als angefordert (KEIN Fehler/
+    leere Antwort) -- fetch_ohlcv_since wertet 'batch kuerzer als angefordert'
+    faelschlich als 'Ende der Historie' und bricht sofort ab (das ist fuer
+    seinen eigentlichen Zweck, kleine Live-Cron-Nachlade-Haeppchen,
+    unproblematisch, aber genau falsch fuer einen grossen Fetch).
+    fetch_historical_ohlcv pagt bis end_ts erreicht ist, unabhaengig von der
+    Page-Groesse -- siehe _bootstrap_brick_chain.
+
+    Wenn der bestehende Cache nicht bis train_start zurueckreicht (z.B. Rest
+    eines frueheren, kleineren Fensters), wird er verworfen und komplett neu
+    ab train_start geladen -- sonst wuerde eine unvollstaendige Historie nie
+    repariert, nur ewig vorne weiter fortgeschrieben."""
     os.makedirs(OHLCV_CACHE, exist_ok=True)
     safe = symbol.replace('/', '-').replace(':', '-')
     cache_file = os.path.join(OHLCV_CACHE, f'{safe}_{timeframe}.csv')
 
-    cutoff = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=ROLLING_WINDOW_DAYS)
+    train_start_ts = pd.Timestamp(train_start, tz='UTC')
     df = pd.DataFrame()
     if os.path.exists(cache_file):
         try:
@@ -98,7 +114,13 @@ def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
             logger.warning(f"Cache-Lesefehler {cache_file}: {e}")
             df = pd.DataFrame()
 
-    start_dt = cutoff if df.empty else (df.index.max() + pd.Timedelta(milliseconds=1))
+    stale = (not df.empty) and (df.index.min() > train_start_ts + pd.Timedelta(days=STALE_CACHE_SLACK_DAYS))
+    if stale:
+        logger.info(f"{symbol} ({timeframe}): Cache beginnt erst {df.index.min()}, "
+                   f"aber train_start ist {train_start_ts} -- verwerfe Cache, lade komplett neu.")
+        df = pd.DataFrame()
+
+    start_dt = train_start_ts if df.empty else (df.index.max() + pd.Timedelta(milliseconds=1))
     end_dt   = pd.Timestamp.now(tz='UTC') + pd.Timedelta(days=1)  # inkl. heute
 
     new_data = exchange.fetch_historical_ohlcv(
@@ -108,7 +130,6 @@ def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
         df = pd.concat([df, new_data]) if not df.empty else new_data
         df = df[~df.index.duplicated(keep='last')].sort_index()
 
-    df = df[df.index >= cutoff]
     if not df.empty:
         df.index.name = 'ts'  # exchange.py's fetch_* nennen den Index 'timestamp' --
                               # hier fest auf 'ts' normalisiert, damit Schreiben (hier)
@@ -163,25 +184,24 @@ def get_active_strategies(settings, logger):
 TF_MINUTES = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '2h': 120, '4h': 240, '6h': 360, '1d': 1440}
 
 
-def build_reference_chain(exchange, symbol, timeframe, strat_params, up_to_ts, logger):
-    """Baut die Referenzkette -- inkl. Plausibilitaetspruefung: bei einem
-    stillen Fetch-Abbruch (z.B. Rate-Limit waehrend der Pagination in
-    load_rolling_ohlcv/fetch_ohlcv_since) waere die Kerzenzahl verdaechtig
-    niedrig fuer das angefragte Fenster -- lieber None (= 'unzuverlaessig,
-    ueberspringen') als eine kaputte Referenz, gegen die faelschlich
-    alarmiert oder sogar korrigiert wuerde."""
-    df = load_rolling_ohlcv(exchange, symbol, timeframe, logger)
+def build_reference_chain(exchange, symbol, timeframe, strat_params, train_start, up_to_ts, logger):
+    """Baut die Referenzkette durchgehend ab train_start (wie backtester.py),
+    inkl. Plausibilitaetspruefung: bei einem stillen Fetch-Abbruch (z.B.
+    Rate-Limit waehrend der Pagination) waere die aelteste geladene Kerze
+    verdaechtig weit von train_start entfernt -- lieber None (= 'unzuverlaessig,
+    ueberspringen') als eine kaputte Referenz, gegen die faelschlich alarmiert
+    oder sogar korrigiert wuerde."""
+    df = load_full_ohlcv(exchange, symbol, timeframe, train_start, logger)
     if df.empty:
         return None
     df = df[df.index <= up_to_ts]
 
-    tf_min = TF_MINUTES.get(timeframe)
-    if tf_min:
-        expected = (ROLLING_WINDOW_DAYS * 24 * 60) / tf_min
-        if len(df) < expected * 0.7:
-            logger.warning(f"{symbol} ({timeframe}): nur {len(df)}/{expected:.0f} erwartete Kerzen geladen "
-                          f"-- vermutlich unvollstaendiger Fetch (Rate-Limit?), Referenz verworfen.")
-            return None
+    train_start_ts = pd.Timestamp(train_start, tz='UTC')
+    if df.empty or df.index.min() > train_start_ts + pd.Timedelta(days=STALE_CACHE_SLACK_DAYS):
+        logger.warning(f"{symbol} ({timeframe}): Referenzdaten beginnen erst bei "
+                      f"{df.index.min() if not df.empty else 'n/a'}, erwartet ab {train_start_ts} "
+                      f"-- vermutlich unvollstaendiger Fetch (Rate-Limit?), Referenz verworfen.")
+        return None
 
     if len(df) < 20:
         return None
@@ -336,12 +356,17 @@ def run(dry_run=False):
             cfg = json.load(f)
         strat = dict(cfg.get('strategy', {}))
         strat.update(overrides)
+        train_start = cfg.get('_meta', {}).get('train_start')
+        if not train_start:
+            logger.info(f"{symbol} ({tf}): keine _meta.train_start in der Config, ueberspringe "
+                       f"(kann keine verlaessliche Referenz bauen).")
+            continue
 
         pending_file = f"{PENDING_PREFIX}{safe}_{tf}.json"
 
         try:
             up_to_ts = pd.Timestamp(live['last_processed_ts'])
-            ref_bricks = build_reference_chain(exchange, symbol, tf, strat, up_to_ts, logger)
+            ref_bricks = build_reference_chain(exchange, symbol, tf, strat, train_start, up_to_ts, logger)
         except Exception as e:
             logger.error(f"{symbol} ({tf}): Referenzketten-Aufbau fehlgeschlagen: {e}", exc_info=True)
             continue
@@ -386,14 +411,14 @@ def run(dry_run=False):
             tg(
                 f"⚠️ ZEROBOT Brick-Kette weicht ab: {symbol} ({tf})\n"
                 f"- Live-Kette: {live['direction'].upper()} @ {live['lc']:.6g}\n"
-                f"- Referenz (frisch, {ROLLING_WINDOW_DAYS}d Kursdaten): {ref_dir.upper()} @ {ref_lc:.6g}\n"
+                f"- Referenz (durchgehend ab {train_start}): {ref_dir.upper()} @ {ref_lc:.6g}\n"
                 f"- Preis-Abweichung: {dev_pct:.2f}%\n"
                 f"Korrigiere sofort..."
             )
             chart_path = _generate_sync_chart(
                 symbol, tf,
                 f"Live-Kette (persistiert) -- {live['direction'].upper()}", live_recent_bricks,
-                f"Referenz-Kette (frisch, {ROLLING_WINDOW_DAYS}d) -- {ref_dir.upper()}", ref_recent_bricks,
+                f"Referenz-Kette (ab {train_start}) -- {ref_dir.upper()}", ref_recent_bricks,
                 f"Abweichung erkannt ({dev_pct:.2f}%)", logger)
             if not dry_run:
                 _send_sync_chart(telegram_config, chart_path,
