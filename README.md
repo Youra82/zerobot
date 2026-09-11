@@ -44,7 +44,7 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 | **Parametersuche** | Optuna (200+ Trials pro Symbol/Timeframe) |
 | **Validierung** | Out-of-Sample Dark Period + 24 statistische Analysen (`run_analysis.sh`) |
 | **Live-Überwachung** | `check_brick_sync.py` — vergleicht Live-Brick-Kette gegen Referenz, korrigiert automatisch, meldet per Telegram |
-| **Re-Optimierung** | wöchentlich automatisch, inline im Cronjob (kein separater Timer nötig) |
+| **Portfolio-Auswahl** | wöchentlich automatisch, inline im Cronjob — wählt aus bestehenden Configs, sucht keine neuen EAR-Parameter (das macht nur `./run_pipeline.sh` manuell) |
 | **Aktive Coins/TFs** | dynamisch aus `settings.json → active_strategies` — siehe [Empfohlene Coins und Timeframes](#empfohlene-coins-und-timeframes) für aktuelle Kandidaten |
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
@@ -915,16 +915,18 @@ NO_TELEGRAM=1 ./run_analysis.sh
 
 ## Automatische Wochenoptimierung
 
-Der `auto_optimizer_scheduler.py` läuft non-blocking bei jedem `master_runner.py`-Aufruf:
+Der `auto_optimizer_scheduler.py` läuft non-blocking bei jedem `master_runner.py`-Aufruf. Wichtig, weil oft missverstanden: Er sucht **keine neuen EAR-Parameter** (das macht ausschließlich das manuelle `./run_pipeline.sh` per Optuna) — er wählt nur aus den *bereits vorhandenen* Configs das beste Portfolio aus. `base_pct`/`k_entropy`/`h_window`/`trend_min_bricks` einer schon aktiven Strategie bleiben dabei unangetastet.
 
 ```mermaid
 flowchart TD
     A["master_runner.py startet"] --> B{"auto_optimizer_scheduler.py:<br/>Ist Optimierung fällig?"}
     B -- Nein --> C["sofort beendet (kein Overhead)"]
-    B -- Ja --> D["optimizer.py<br/>neue Parameter via Optuna suchen"]
-    D --> E["run_portfolio_optimizer.py --auto-write<br/>bestes Portfolio → settings.json aktualisieren"]
+    B -- Ja --> D["run_portfolio_optimizer.py --auto-write<br/>waehlt bestes Portfolio AUS BESTEHENDEN Configs<br/>→ settings.json aktualisieren"]
+    D --> E["init_brick_states.py --all<br/>waermt State nur fuer NEU aktivierte Symbole vor<br/>(bestehende States bleiben unveraendert)"]
     E --> F["Telegram: Start- + Ende-Benachrichtigung"]
 ```
+
+Neue EAR-Parameter für ein Symbol entstehen nur durch ein manuelles `./run_pipeline.sh` — und `optimizer.py` überschreibt die Config dabei unabhängig davon, ob das Symbol gerade live handelt. Läuft dabei zufällig eine Position auf dem alten Parametersatz, erkennt und korrigiert `check_brick_sync.py` die dadurch entstehende Diskrepanz automatisch beim nächsten Zyklus (siehe [Phase 3](#wie-das-system-funktioniert)).
 
 Manuell erzwingen:
 
