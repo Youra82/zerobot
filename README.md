@@ -96,7 +96,9 @@ trend_min_bricks      — Mindest-Bricks in Trendrichtung für Signal-Bestätigu
 trend_reversal_bricks — Bricks gegen Trend für Entry-Trigger  (1–3)
 
 atr_multiplier_sl    — SL-Abstand vom Entry in ATR-Vielfachen  (1.5–5.0)
-risk_reward_ratio    — TP = SL × RRR  (1.5–5.0)
+risk_reward_ratio    — nur fuer Kelly-Sizing/Walk-Forward-Analysen (1.5–5.0);
+                        der echte TP-Exit ist live wie im Backtest der erste
+                        Gegenbrick, kein fixer Preis -- siehe Phase 2
 leverage              — Hebel  (5–20×)
 ```
 
@@ -235,7 +237,7 @@ flowchart TD
     C --> D["Signal prüfen: trend_min_bricks Trend-Bricks<br/>+ trend_reversal_bricks Gegen-Bricks"]
     D --> E["Entry: Trigger-Limit-Order<br/>(0.05% Delta vom letzten Brick-Close)"]
     E --> F["SL = ATR × atr_multiplier_sl vom Entry-Preis"]
-    F --> G["TP = SL-Abstand × risk_reward_ratio"]
+    F --> G["Kein fixes TP -- Exit beim ersten Gegenbrick<br/>(Brick-Reversal-Check, jeden Zyklus neu geprüft)"]
 ```
 
 #### Beispiel-Signal
@@ -245,11 +247,15 @@ flowchart TD
   Symbol:    SOL/USDT:USDT (4h)
   Richtung:  LONG
   EAR-Brick: close × 0.005 × (1 + 0.8 × H)  ≈ 0.72 USDT pro Brick
-  Entry:     ~148.20 USDT (Trigger-Limit)
-  SL:         144.80 USDT (ATR × 2.3 unter Entry)
-  TP:         155.00 USDT (SL × 2.1 RRR)
+  Entry:     ~149.38 USDT (Trigger-Limit)
+  SL:         146.50 USDT (ATR-basiert, unter der Konsolidierung vor dem Entry)
+  TP:         kein fixer Preis -- Exit beim ersten Gegenbrick
   Hebel:      12×
 ```
+
+![Beispiel-Trade: EAR-Brick-Entry und Gegenbrick-Exit](assets/ear_trade_example.png)
+
+Der Chart zeigt exakt die Renderfunktion, die der Live-Bot auch für seine eigenen Telegram-Signale nutzt (`trade_manager._generate_brick_png`) — hier mit einer sauberen Beispielsequenz statt Live-Daten. Nach der Konsolidierung (rote Bricks) bestätigen drei aufeinanderfolgende Up-Bricks den Trendwechsel und lösen den Entry aus; der Trend läuft weiter, bis der erste Gegenbrick (rot, nach dem Hoch) den Exit auslöst — kein fixer Kurs, sondern ein Strukturereignis in der Brick-Kette selbst.
 
 ### Phase 3 — Live-Überwachung (`check_brick_sync.py`)
 
