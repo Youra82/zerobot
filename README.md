@@ -53,9 +53,9 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 
 ## Demo
 
-![ZeroBot Demo](assets/demo.mp4)
+[![ZeroBot Demo — Video abspielen](assets/demo_thumbnail.png)](assets/demo.mp4)
 
-Ein 2:38-minütiges, vollständig vertontes Erklärvideo (deutsche Sprachausgabe) durch Idee, Installation, Optimierung, Live-Trading-Zyklus und einen echten Beispiel-Trade — `assets/demo.mp4`. Programmatisch erzeugt (Python/PIL-Frames + Windows-Sprachsynthese + ffmpeg), kein Screen-Recording.
+**[▶ Video abspielen](assets/demo.mp4)** (2:38 min, `assets/demo.mp4`) — GitHub zeigt beim Öffnen der Datei einen eingebetteten Player; Vorschaubild oben ist anklickbar. Ein vollständig vertontes Erklärvideo (deutsche Sprachausgabe) durch Idee, Installation, Optimierung, Live-Trading-Zyklus und einen echten Beispiel-Trade. Programmatisch erzeugt (Python/PIL-Frames + Windows-Sprachsynthese + ffmpeg), kein Screen-Recording — direkte Inline-Wiedergabe im Markdown selbst unterstützt GitHub nur für Dateien, die über die Weboberfläche hochgeladen wurden, nicht für Video-Dateien aus dem Repo.
 
 Zusätzlich als interaktive, selbstständig abspielende Web-Seite: **[▶ ZeroBot in Motion](assets/demo.html)** (Pfeiltasten/Klick zum Navigieren, Pause-Button) — lokal im Browser öffnen oder online: [claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea](https://claude.ai/code/artifact/dc0e6f24-e1ac-491e-8185-5e27331ad5ea).
 
