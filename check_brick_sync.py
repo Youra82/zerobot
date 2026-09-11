@@ -67,8 +67,19 @@ def setup_logging():
 def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
     """Rollierender lokaler Cache (eigenstaendig von backtester.load_data,
     damit ein 'heute' als Endzeitpunkt nicht bei jedem Lauf einen vollen
-    Jahre-Refetch auslöst -- nur die neuesten Kerzen kommen via
-    fetch_ohlcv_since dazu, wie update_brick_chain es fuer den Live-Bot tut."""
+    Jahre-Refetch ausloest -- nur die neuesten Kerzen kommen bei jedem Lauf dazu.
+
+    Nutzt bewusst fetch_historical_ohlcv (nicht fetch_ohlcv_since): Live
+    verifiziert (2026-09-11) liefert Bitget fuer eine grosse Zeitspanne (hier:
+    100 Tage) auf der allerersten Page still nur ~199 statt 200 Kerzen (deckt
+    nur ~8 Tage ab, KEIN Fehler/leere Antwort) -- fetch_ohlcv_since wertet
+    'batch kuerzer als angefordert' faelschlich als 'Ende der Historie' und
+    bricht sofort ab (das ist fuer seinen eigentlichen Zweck, kleine
+    Live-Cron-Nachlade-Haeppchen, unproblematisch, aber genau falsch fuer
+    einen grossen Warmup-Fetch). fetch_historical_ohlcv hat diese Annahme
+    nicht (paged bis end_ts erreicht ist, unabhaengig von der Page-Groesse)
+    und ist bereits an anderer Stelle im Projekt fuer genau diesen Fall
+    (grosser Bootstrap-Fetch) verifiziert -- siehe _bootstrap_brick_chain."""
     os.makedirs(OHLCV_CACHE, exist_ok=True)
     safe = symbol.replace('/', '-').replace(':', '-')
     cache_file = os.path.join(OHLCV_CACHE, f'{safe}_{timeframe}.csv')
@@ -83,13 +94,13 @@ def load_rolling_ohlcv(exchange, symbol, timeframe, logger):
             logger.warning(f"Cache-Lesefehler {cache_file}: {e}")
             df = pd.DataFrame()
 
-    if df.empty:
-        since_ms = int(cutoff.timestamp() * 1000)
-    else:
-        since_ms = int(df.index.max().timestamp() * 1000) + 1
+    start_dt = cutoff if df.empty else (df.index.max() + pd.Timedelta(milliseconds=1))
+    end_dt   = pd.Timestamp.now(tz='UTC') + pd.Timedelta(days=1)  # inkl. heute
 
-    new_data = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
+    new_data = exchange.fetch_historical_ohlcv(
+        symbol, timeframe, start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
     if not new_data.empty:
+        new_data = new_data[new_data.index >= start_dt]
         df = pd.concat([df, new_data]) if not df.empty else new_data
         df = df[~df.index.duplicated(keep='last')].sort_index()
 
