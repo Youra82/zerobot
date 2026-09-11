@@ -313,6 +313,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     trades_count     = 0
     wins_count       = 0
     position         = None
+    last_entry_price = None  # Re-Entry-Schutz -- siehe trade_manager.check_and_open_new_position
 
     risk_per_trade_pct    = risk_params.get('risk_per_trade_pct', 1.0) / 100
     leverage              = risk_params.get('leverage', 10)
@@ -416,6 +417,15 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                 entry_price = bricks[bidx]['close']
                 sl_price    = bricks[bidx - sl_bricks_back]['close']
 
+                # Re-Entry-Schutz: identisch zu trade_manager.check_and_open_new_position --
+                # kein neuer Entry, wenn Preis < 1.5% vom letzten Entry-Preis entfernt ist
+                # (unabhaengig von Richtung/Gewinn-Verlust des vorherigen Trades). Ohne das
+                # handelt der Backtester systematisch mehr Trades als live und divergiert.
+                if last_entry_price is not None:
+                    distance_pct = abs(entry_price - last_entry_price) / last_entry_price
+                    if distance_pct < 0.015:
+                        continue
+
                 sl_dist = abs(entry_price - sl_price)
                 if sl_dist <= 0:
                     continue
@@ -439,6 +449,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     'notional_value': final_notional,
                     'entry_time':     timestamp,
                 }
+                last_entry_price = entry_price
 
     win_rate      = (wins_count / trades_count * 100) if trades_count > 0 else 0
     final_pnl_pct = ((current_capital - start_capital) / start_capital) * 100
