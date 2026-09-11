@@ -10,11 +10,15 @@ akkumulieren Drift ueber Wochen, siehe research_zerobot_live_vs_backtest_2026_09
 Bei Richtungs-Abweichung (das kritische Signal -- Live und Referenz zeigen
 entgegengesetzten Trend):
   1. Telegram-Alarm "Abweichung erkannt".
-  2. Korrektur NUR wenn aktuell keine Position fuer das Symbol offen ist
-     (sonst wuerde man einem laufenden Trade die Gegenbrick-Definition
-     unter den Fuessen wegziehen -- eigenes Risiko). Bei offener Position:
-     Telegram "Korrektur verschoben", kein erneuter Alarm bei Folge-Laeufen
-     fuer dieselbe Abweichung (Dedup ueber pending-Marker-Datei).
+  2. Korrektur IMMER, unabhaengig davon ob eine Position offen ist (auch bei
+     laufendem Trade -- die persistierte Kette bestimmt die Gegenbrick-
+     Definition fuer den dynamischen TP-Exit, siehe
+     trade_manager.check_and_close_on_brick_reversal; eine bekannt falsche
+     Kette unkorrigiert weiterlaufen zu lassen waere gefaehrlicher als die
+     Korrektur selbst -- siehe Forensik zum ADA-Fall vom 2026-09-11).
+     Keine kuenstliche Uebergangs-Brick, keine Sonderbehandlung: exakt
+     dieselbe echte, aus realen Kursdaten neu gebaute Referenzkette wie bei
+     geschlossener Position.
   3. Nach erfolgter Korrektur: Telegram-Bestaetigung.
 
 Gedacht fuer denselben 15-Min-Cron-Rhythmus wie master_runner.py, eigener
@@ -384,7 +388,7 @@ def run(dry_run=False):
                 f"- Live-Kette: {live['direction'].upper()} @ {live['lc']:.6g}\n"
                 f"- Referenz (frisch, {ROLLING_WINDOW_DAYS}d Kursdaten): {ref_dir.upper()} @ {ref_lc:.6g}\n"
                 f"- Preis-Abweichung: {dev_pct:.2f}%\n"
-                f"Pruefe auf offene Position..."
+                f"Korrigiere sofort..."
             )
             chart_path = _generate_sync_chart(
                 symbol, tf,
@@ -403,12 +407,8 @@ def run(dry_run=False):
 
         open_pos = exchange.fetch_open_positions(symbol)
         if open_pos:
-            if not already_alerted:
-                tg(f"⏳ ZEROBOT: Korrektur fuer {symbol} ({tf}) verschoben — "
-                   f"Position ist noch offen. Wird nach Schliessung automatisch nachgeholt.")
-            else:
-                logger.info(f"{symbol} ({tf}): Abweichung weiter bekannt, Position noch offen -- warte.")
-            continue
+            logger.info(f"{symbol} ({tf}): Position offen -- korrigiere trotzdem sofort "
+                       f"(persistierte Kette bestimmt den dynamischen Gegenbrick-TP).")
 
         new_state = {
             'lc': ref_lc,
@@ -444,7 +444,8 @@ def run(dry_run=False):
 
         tg(f"✅ ZEROBOT: Brick-Kette fuer {symbol} ({tf}) korrigiert "
            f"(neu: {ref_dir.upper()} @ {ref_lc:.6g}, Abweichung war {dev_pct:.2f}%)"
-           f"{' -- von der Platte zurueckgelesen bestaetigt' if not dry_run else ''}.")
+           f"{' -- von der Platte zurueckgelesen bestaetigt' if not dry_run else ''}."
+           f"{' Position war offen -- ab sofort gilt fuer den TP-Gegenbrick der korrigierte Anker.' if open_pos else ''}")
         written_recent = [tuple(x) for x in written.get('recent_bricks', [])]
         fix_chart_path = _generate_sync_chart(
             symbol, tf,
