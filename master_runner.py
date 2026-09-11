@@ -10,6 +10,7 @@ PROJECT_ROOT = SCRIPT_DIR
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.utils.exchange import Exchange
+import check_brick_sync
 
 
 def _parse_symbol_timeframe(prefix):
@@ -122,6 +123,15 @@ def main():
         if not strategy_list:
             print("Keine aktiven Strategien gefunden.")
             return
+
+        print("[Brick-Sync] Pruefe Live-Ketten gegen Referenz...")
+        try:
+            check_brick_sync.run(dry_run=False)
+        except Exception as e:
+            # Darf den eigentlichen Trading-Zyklus nie blockieren, egal was
+            # hier schiefgeht -- Sync-Check ist eine Absicherung, keine
+            # Voraussetzung fuer full_trade_cycle.
+            print(f"[Brick-Sync] Fehler (Zyklus laeuft trotzdem weiter): {e}")
 
         print("=======================================================")
 

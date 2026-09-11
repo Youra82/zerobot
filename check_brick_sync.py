@@ -254,14 +254,12 @@ def _send_sync_chart(telegram_config, path, caption, logger):
             os.remove(path)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dry-run', action='store_true',
-                       help='Nur pruefen/loggen, kein Telegram, keine Datei-Korrektur.')
-    args = parser.parse_args()
-
+def run(dry_run=False):
+    """Ein Durchlauf des Brick-Sync-Checks. dry_run=True: nur pruefen/loggen,
+    kein Telegram, keine Datei-Korrektur. Importierbar (z.B. aus
+    master_runner.py, statt als eigener Cronjob) oder per CLI (siehe main())."""
     logger = setup_logging()
-    logger.info(f"--- Brick-Sync-Check gestartet{' (DRY-RUN)' if args.dry_run else ''} ---")
+    logger.info(f"--- Brick-Sync-Check gestartet{' (DRY-RUN)' if dry_run else ''} ---")
 
     with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
         secrets = json.load(f)
@@ -273,7 +271,7 @@ def main():
 
     def tg(msg):
         logger.info(msg.replace('\n', ' | '))
-        if args.dry_run:
+        if dry_run:
             try:
                 print(f"[DRY-RUN TELEGRAM] {msg}")
             except UnicodeEncodeError:
@@ -357,7 +355,7 @@ def main():
 
         if dir_match:
             if os.path.exists(pending_file):
-                os.remove(pending_file) if not args.dry_run else None
+                os.remove(pending_file) if not dry_run else None
                 logger.info(f"{symbol} ({tf}): Abweichung hat sich von selbst aufgeloest, Marker entfernt.")
             continue
 
@@ -378,12 +376,12 @@ def main():
                 f"Live-Kette (persistiert) -- {live['direction'].upper()}", live_recent_bricks,
                 f"Referenz-Kette (frisch, {ROLLING_WINDOW_DAYS}d) -- {ref_dir.upper()}", ref_recent_bricks,
                 f"Abweichung erkannt ({dev_pct:.2f}%)", logger)
-            if not args.dry_run:
+            if not dry_run:
                 _send_sync_chart(telegram_config, chart_path,
                                 f"{symbol} ({tf}): Brick-Abweichung {dev_pct:.2f}%", logger)
             elif chart_path:
                 print(f"[DRY-RUN] Vergleichs-Chart erzeugt: {chart_path}")
-            if not args.dry_run:
+            if not dry_run:
                 with open(pending_file, 'w') as f:
                     json.dump({'detected_at': datetime.now(timezone.utc).isoformat(),
                                'live_lc': live['lc'], 'ref_lc': ref_lc}, f)
@@ -404,7 +402,7 @@ def main():
             'recent_bricks': [[b['direction'], b['close']] for b in ref_bricks[-20:]],
         }
 
-        if args.dry_run:
+        if dry_run:
             print(f"[DRY-RUN] wuerde {path} korrigieren auf: {new_state['direction']} @ {new_state['lc']:.6g}")
         else:
             with open(path, 'w') as f:
@@ -419,13 +417,21 @@ def main():
             f"Vorher (fehlerhaft) -- {live['direction'].upper()}", live_recent_bricks,
             f"Jetzt (korrigiert) -- {ref_dir.upper()}", ref_recent_bricks,
             f"Korrigiert (war {dev_pct:.2f}% abweichend)", logger)
-        if not args.dry_run:
+        if not dry_run:
             _send_sync_chart(telegram_config, fix_chart_path,
                             f"{symbol} ({tf}): korrigiert", logger)
         elif fix_chart_path:
             print(f"[DRY-RUN] Korrektur-Chart erzeugt: {fix_chart_path}")
 
     logger.info(f"--- Brick-Sync-Check abgeschlossen ---")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Nur pruefen/loggen, kein Telegram, keine Datei-Korrektur.')
+    args = parser.parse_args()
+    run(dry_run=args.dry_run)
 
 
 if __name__ == '__main__':
