@@ -419,18 +419,37 @@ def run(dry_run=False):
 
         if dry_run:
             print(f"[DRY-RUN] wuerde {path} korrigieren auf: {new_state['direction']} @ {new_state['lc']:.6g}")
+            written = new_state
         else:
             with open(path, 'w') as f:
                 json.dump(new_state, f)
+            # Echte Verifikation statt Wiederverwendung der im Speicher gehaltenen
+            # Werte: Datei zurueck von der Platte lesen, damit die Bestaetigung
+            # einen tatsaechlich erfolgten (und korrekt lesbaren) Schreibvorgang
+            # belegt, nicht nur behauptet.
+            try:
+                with open(path) as f:
+                    written = json.load(f)
+            except Exception as e:
+                tg(f"🛑 ZEROBOT: Korrektur fuer {symbol} ({tf}) geschrieben, aber "
+                   f"Rueck-Lesen zur Verifikation fehlgeschlagen: {e}. Bitte manuell pruefen!")
+                continue
+            if written.get('direction') != ref_dir or abs(written.get('lc', 0) - ref_lc) > 1e-12:
+                tg(f"🛑 ZEROBOT: Korrektur fuer {symbol} ({tf}) verifiziert FEHLGESCHLAGEN "
+                   f"-- Datei zeigt {written.get('direction')}@{written.get('lc')}, "
+                   f"erwartet war {ref_dir}@{ref_lc:.6g}. Bitte manuell pruefen!")
+                continue
             if os.path.exists(pending_file):
                 os.remove(pending_file)
 
         tg(f"✅ ZEROBOT: Brick-Kette fuer {symbol} ({tf}) korrigiert "
-           f"(neu: {ref_dir.upper()} @ {ref_lc:.6g}, Abweichung war {dev_pct:.2f}%).")
+           f"(neu: {ref_dir.upper()} @ {ref_lc:.6g}, Abweichung war {dev_pct:.2f}%)"
+           f"{' -- von der Platte zurueckgelesen bestaetigt' if not dry_run else ''}.")
+        written_recent = [tuple(x) for x in written.get('recent_bricks', [])]
         fix_chart_path = _generate_sync_chart(
             symbol, tf,
             f"Vorher (fehlerhaft) -- {live['direction'].upper()}", live_recent_bricks,
-            f"Jetzt (korrigiert) -- {ref_dir.upper()}", ref_recent_bricks,
+            f"Jetzt (korrigiert, von Platte gelesen) -- {written.get('direction', ref_dir).upper()}", written_recent,
             f"Korrigiert (war {dev_pct:.2f}% abweichend)", logger)
         if not dry_run:
             _send_sync_chart(telegram_config, fix_chart_path,
