@@ -14,6 +14,8 @@ import os
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
+from zerobot.analysis.backtester import _count_funding_events, FUNDING_RATE_PCT_PER_8H
+
 
 def collect_strategy_events(strat_key: str, strat: dict, start_capital: float,
                             trade_start_date: str = None) -> list:
@@ -91,7 +93,8 @@ def replay_portfolio_events(start_capital: float, all_events: list,
     trade_history     = []
     equity_curve      = [{'timestamp': timeline[0][1], 'equity': start_capital}]
 
-    fee_pct = 0.06 / 100
+    fee_pct         = 0.06 / 100
+    funding_rate_pct = FUNDING_RATE_PCT_PER_8H / 100
 
     for event_type, event_time, ev in timeline:
         if liquidation_date:
@@ -107,8 +110,10 @@ def replay_portfolio_events(start_capital: float, all_events: list,
             notional = pos['notional_value']
             side     = pos['side']
 
-            pnl_pct = (exit_px / entry_px - 1) if side == 'long' else (1 - exit_px / entry_px)
-            pnl_usd = notional * pnl_pct - notional * fee_pct * 2
+            pnl_pct      = (exit_px / entry_px - 1) if side == 'long' else (1 - exit_px / entry_px)
+            n_funding    = _count_funding_events(pos['entry_time'], event_time)
+            funding_cost = notional * funding_rate_pct * n_funding * (1 if side == 'long' else -1)
+            pnl_usd = notional * pnl_pct - notional * fee_pct * 2 - funding_cost
             equity += pnl_usd
 
             trade_history.append({

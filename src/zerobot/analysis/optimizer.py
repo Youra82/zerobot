@@ -108,6 +108,16 @@ def objective(trial):
     # Positionsgroesse zu waehlen.
     dd_pct = max(drawdown * 100.0, 0.5)  # Bodenwert verhindert Division durch ~0 bei DD-freien Serien
     calmar = pnl / dd_pct
+
+    # WICHTIG: echtes PnL zusaetzlich als user_attr sichern. Der Rueckgabewert
+    # dieser Funktion (jetzt calmar*log(n) statt pnl*log(n)) ist Optunas
+    # interner Score zur TRIAL-AUSWAHL -- er darf NICHT mit dem in der
+    # Config-Datei gespeicherten echten pnl_pct verglichen werden (siehe
+    # main(): "existing_pnl" stammt aus alten, mit dem RAW-PnL-Objective
+    # erzeugten Configs und ist um Groessenordnungen groesser als ein
+    # Calmar-Score). Ohne diesen Fix haette main() faelschlich JEDE
+    # bestehende Config als "besser" eingestuft und nie mehr aktualisiert.
+    trial.set_user_attr('real_pnl', pnl)
     return calmar * math.log(1.0 + trades)
 
 
@@ -239,7 +249,11 @@ def main():
 
         best_trial  = max(valid_trials, key=lambda t: t.value)
         best_params = best_trial.params
-        new_pnl     = best_trial.value
+        # best_trial.value ist der Calmar-Score (siehe objective()) -- fuer den
+        # Vergleich mit der bestehenden Config (echtes pnl_pct) und fuer die
+        # Config-Metadaten wird das tatsaechliche PnL aus dem user_attr
+        # verwendet, nicht der Score selbst.
+        new_pnl     = best_trial.user_attrs.get('real_pnl', best_trial.value)
 
         config_dir         = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
         os.makedirs(config_dir, exist_ok=True)
