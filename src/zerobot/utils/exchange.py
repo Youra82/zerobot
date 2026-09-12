@@ -313,6 +313,22 @@ class Exchange:
             logger.error(f"Fehler bei fetch_open_positions: {e}")
             return []
 
+    def fetch_funding_fees(self, symbol, since_ms):
+        """Summe der tatsaechlich abgerechneten Funding-Zahlungen (Bitget Perpetual,
+        alle 8h) fuer symbol seit since_ms -- ccxt-normalisiert: positiv = dem
+        Konto gutgeschrieben, negativ = belastet. Bisher nirgends im Bot genutzt;
+        der Backtester (siehe backtester.py::FUNDING_RATE_PCT_PER_8H) rechnet nur
+        mit einer Pauschalannahme, da Bitgets API keine tiefe Funding-Historie
+        liefert -- live kann der tatsaechliche Betrag aber direkt abgefragt werden."""
+        if not self.markets:
+            return 0.0
+        try:
+            entries = self.exchange.fetch_funding_history(symbol, since=int(since_ms))
+            return sum(float(e.get('amount', 0) or 0) for e in entries)
+        except Exception as e:
+            logger.warning(f"fetch_funding_fees({symbol}) fehlgeschlagen: {e}")
+            return 0.0
+
     def fetch_open_trigger_orders(self, symbol):
         if not self.markets:
             return []

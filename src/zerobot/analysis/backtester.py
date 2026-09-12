@@ -19,6 +19,41 @@ from zerobot.utils.timeframe_utils import determine_htf
 
 secrets_cache = None
 
+# Bitget-Perpetual-Funding: alle 8h (00:00/08:00/16:00 UTC) wird ein Funding-
+# Satz zwischen Long/Short-Seite ausgetauscht -- bisher NIRGENDS im Backtester
+# beruecksichtigt (verifiziert: 2026-09-12, ccxt fetch_funding_rate_history
+# liefert nur ~33 Tage Historie zurueck, also keine echten Raten fuer den
+# mehrjaehrigen Trainingszeitraum moeglich). Pauschalsatz aus echten aktuellen
+# Bitget-Daten fuer die aktiven Symbole (DOT/XRP/ADA/SHIB/BNB/SOL/DOGE):
+# 30-Intervall-Mittel 0.0033%-0.0090%, Bitget-Deckel bei 0.01% je Intervall --
+# konservativ (eher zu hoch als zu niedrig) auf den Deckel gesetzt, analog zur
+# bereits bestehenden fee_pct-Pauschalannahme (0.06% Taker).
+FUNDING_RATE_PCT_PER_8H = 0.01
+
+
+def _count_funding_events(entry_time, exit_time):
+    """Zaehlt Bitget-Funding-Zeitpunkte (00:00/08:00/16:00 UTC) im Intervall
+    (entry_time, exit_time] -- Funding wird nur faellig wenn eine Position
+    ueber einen dieser Zeitpunkte hinweg gehalten wird, nicht bei Entry
+    selbst."""
+    entry_time = pd.Timestamp(entry_time)
+    exit_time = pd.Timestamp(exit_time)
+    if entry_time.tzinfo is None:
+        entry_time = entry_time.tz_localize('UTC')
+    if exit_time.tzinfo is None:
+        exit_time = exit_time.tz_localize('UTC')
+    if exit_time <= entry_time:
+        return 0
+    count = 0
+    day = entry_time.normalize()
+    while day <= exit_time:
+        for h in (0, 8, 16):
+            ft = day + pd.Timedelta(hours=h)
+            if entry_time < ft <= exit_time:
+                count += 1
+        day += pd.Timedelta(days=1)
+    return count
+
 # Feinere Timeframe je Strategie-Timeframe fuer die Intrabar-Reihenfolgen-Aufloesung
 # (SL vs. Brick-TP in derselben Kerze -- oraclebot-Muster).
 FINE_TF_MAP = {
@@ -271,7 +306,7 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 
 def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
                  fee_pct_override=None, return_trades=False,
-                 trade_start_date=None, fine_data=None):
+                 trade_start_date=None, fine_data=None, funding_rate_override=None):
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
@@ -318,6 +353,8 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     risk_per_trade_pct    = risk_params.get('risk_per_trade_pct', 1.0) / 100
     leverage              = risk_params.get('leverage', 10)
     fee_pct               = (fee_pct_override / 100) if fee_pct_override is not None else (0.06 / 100)
+    funding_rate_pct      = (funding_rate_override / 100) if funding_rate_override is not None \
+                            else (FUNDING_RATE_PCT_PER_8H / 100)
     absolute_max_notional = 1000000
 
     trades_list      = []
@@ -372,7 +409,14 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                 notional_value = position['notional_value']
                 pnl_usd        = notional_value * pnl_pct
                 total_fees     = notional_value * fee_pct * 2
-                net            = pnl_usd - total_fees
+                # Funding-Kosten: Bitget-Perpetuals tauschen alle 8h (00/08/16 UTC)
+                # einen Satz zwischen Long/Short. Pauschalannahme (siehe
+                # FUNDING_RATE_PCT_PER_8H): bei positivem Satz zahlen Longs,
+                # Shorts erhalten -- war bisher komplett unberuecksichtigt.
+                n_funding_events = _count_funding_events(position['entry_time'], timestamp)
+                funding_sign     = 1 if position['side'] == 'long' else -1
+                funding_cost     = notional_value * funding_rate_pct * n_funding_events * funding_sign
+                net            = pnl_usd - total_fees - funding_cost
                 current_capital += net
                 if net > 0:
                     wins_count += 1
@@ -388,6 +432,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                         'take_profit':   None,
                         'exit_reason':   exit_reason,
                         'pnl_usd':       round(net, 4),
+                        'funding_cost':  round(funding_cost, 4),
                         'win':           net > 0,
                         'capital_after': round(current_capital, 4),
                     })

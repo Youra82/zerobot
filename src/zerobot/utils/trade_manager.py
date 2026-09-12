@@ -567,12 +567,20 @@ def _close_position(exchange, symbol, pos_info, params, telegram_config, logger,
                 sl_price    = trade_lock.get(f'{symbol_timeframe}_sl_price')
                 entry_time_str = trade_lock.get(f'{symbol_timeframe}_entry_time')
                 pnl         = _pnl_str(entry_price, exit_price, pos_side) if entry_price else "?"
+                funding_line = ""
+                if entry_time_str:
+                    try:
+                        since_ms = int(datetime.fromisoformat(entry_time_str).timestamp() * 1000)
+                        funding  = exchange.fetch_funding_fees(symbol, since_ms)
+                        funding_line = f"\n- Funding: {funding:+.4f} USDT"
+                    except Exception as fe:
+                        logger.warning(f"Funding-Abfrage fehlgeschlagen: {fe}")
                 msg = (
                     f"ZEROBOT (EAR) - Trade geschlossen (TP)\n"
                     f"- Symbol: {symbol} ({tf})\n"
                     f"- Seite: {pos_side.upper()}\n"
                     f"- Exit: {exit_price:.8f}\n"
-                    f"- PnL: {pnl}\n"
+                    f"- PnL: {pnl}{funding_line}\n"
                     f"- Grund: {reason}"
                 )
                 send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
@@ -876,12 +884,20 @@ def _notify_sl_fired(exchange, symbol, timeframe, symbol_timeframe, trade_lock, 
 
     if telegram_config and telegram_config.get('bot_token') and telegram_config.get('chat_id'):
         price_str = f"{float(exit_price):.8f}" if exit_price else "unbekannt"
+        funding_line = ""
+        if entry_time_str:
+            try:
+                since_ms = int(datetime.fromisoformat(entry_time_str).timestamp() * 1000)
+                funding  = exchange.fetch_funding_fees(symbol, since_ms)
+                funding_line = f"\n- Funding: {funding:+.4f} USDT"
+            except Exception as fe:
+                logger.warning(f"Funding-Abfrage fehlgeschlagen: {fe}")
         msg = (
             f"ZEROBOT (EAR) - SL ausgeloest\n"
             f"- Symbol: {symbol} ({timeframe})\n"
             f"- Seite: {entry_side.upper()}\n"
             f"- SL-Exit: ~{price_str}\n"
-            f"- PnL: ~{pnl}"
+            f"- PnL: ~{pnl}{funding_line}"
         )
         send_message(telegram_config['bot_token'], telegram_config['chat_id'], msg)
 
