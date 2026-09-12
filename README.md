@@ -508,7 +508,7 @@ Der wöchentliche Auto-Optimizer (`run_portfolio_optimizer.py`) liest diesen Wer
 <details>
 <summary><strong>2) Slippage & Fee Impact</strong> — testet Empfindlichkeit gegenüber Handelskosten</summary>
 
-**Was es ist:** Testet wie empfindlich die Strategie auf Handelskosten reagiert. Jede Config wird mit Gebührensätzen von 0% bis 0.20% pro Seite simuliert (0.06% = Bitget Taker-Fee).
+**Was es ist:** Testet wie empfindlich die Strategie auf Handelskosten reagiert. Jede Config wird mit Gebührensätzen von 0% bis 0.20% pro Seite simuliert (0.06% = Bitget Taker-Fee). Zusätzlich rechnet der Backtester eine Funding-Pauschale ein (0.01% je 8h-Intervall, proportional zur Haltedauer — siehe `backtester.py::FUNDING_RATE_PCT_PER_8H`; echte historische Bitget-Funding-Raten sind über die API nur für die letzten ~33 Tage abrufbar, für den mehrjährigen Trainingszeitraum daher nicht möglich). Live wird das tatsächlich abgerechnete Funding beim Trade-Exit per Telegram gemeldet, nicht nur die Pauschale.
 
 **Was ausgewertet wird:**
 - PnL% und Win-Rate bei jeder Gebührenstufe
