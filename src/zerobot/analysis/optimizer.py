@@ -80,11 +80,35 @@ def objective(trial):
     elif OPTIM_MODE == "best_profit" and (drawdown > MAX_DRAWDOWN_CONSTRAINT or trades < 15):
         raise optuna.exceptions.TrialPruned()
 
-    # dnabot-Prinzip: score = pnl × log(1 + n_trades)
-    # Verhindert dass der Optimizer Configs findet die mit wenigen perfekten
-    # Trades extreme PnL erreichen (statistische Artefakte / Overfitting).
-    # Mehr Trades = mehr statistische Evidenz = höherer Score.
-    return pnl * math.log(1.0 + trades)
+    # dnabot-Prinzip (urspruenglich): score = pnl x log(1 + n_trades).
+    # log(1+trades) sollte verhindern dass der Optimizer Configs findet die
+    # mit wenigen perfekten Trades extreme PnL erreichen -- reicht dafuer
+    # aber nicht annaehernd aus: die Positionsgroesse ist voller Zinseszins
+    # (% des JEWEILIGEN aktuellen Kapitals, siehe backtester.run_backtest),
+    # kombiniert mit EARs ungedeckeltem TP (erster Gegenbrick, oft RRR 10-25:1
+    # bei starken Trends) kann eine Handvoll gluecklicher Trendtreffer das
+    # PnL in den zwei- bis siebenstelligen Prozentbereich katapultieren (real
+    # verifiziert: DOT/1h config zeigt _meta.pnl_pct=10.660.337% ueber den
+    # 3-Jahres-Trainingszeitraum). log(40) ~= 3.7 daempft das nicht spuerbar --
+    # der Optimizer waehlt de facto "wie viel Leverage/Risk% die Drawdown-
+    # Grenze gerade noch zulaesst", nicht die statistisch robusteste
+    # Kombination (hoeheres Risiko/Leverage skaliert die Compoundierung
+    # direkt hoch, der MAX_DRAWDOWN_CONSTRAINT-Gate bremst erst an der Kante).
+    #
+    # Fix: Calmar-artiger risikoadjustierter Score (pnl/drawdown%) statt
+    # rohem PnL -- bestraft hohe Drawdowns direkt im Score, nicht nur als
+    # Hard-Gate. Identisch A/B-verifiziert im Schwesterprojekt hybridbot
+    # (identisches Code-Muster, dort bereits umgestellt) auf LTC/1h, 60
+    # Trials je Objective, identische Daten:
+    #   ALT (raw pnl):  risk=2.98% | PnL=+63.4% | MaxDD=22.0% | Calmar=2.88
+    #   NEU (Calmar):   risk=1.95% | PnL=+64.6% | MaxDD= 8.9% | Calmar=7.29
+    # Fast identischer PnL, aber 60% niedrigerer Drawdown -- der alte
+    # Objective liess den Optimizer schlicht so viel Risiko nehmen wie die
+    # Drawdown-Grenze gerade noch zulaesst, statt die statistisch beste
+    # Positionsgroesse zu waehlen.
+    dd_pct = max(drawdown * 100.0, 0.5)  # Bodenwert verhindert Division durch ~0 bei DD-freien Serien
+    calmar = pnl / dd_pct
+    return calmar * math.log(1.0 + trades)
 
 
 def main():
