@@ -544,7 +544,8 @@ def main() -> int:
         trade_start_date=trade_start,
         oos_map=oos_map if oos_map else None,
         smoothing_step_days=smoothing_step_days,
-        smoothing_samples=smoothing_samples)
+        smoothing_samples=smoothing_samples,
+        max_positions=max_positions)
 
     if not result or not result.get('optimal_portfolio'):
         print(f"{R}  Kein Portfolio erfüllt MaxDD <= {max_dd:.0f}%.{NC}\n")

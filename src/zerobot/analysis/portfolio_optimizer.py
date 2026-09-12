@@ -55,7 +55,8 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
                             trade_start_date: str = None,
                             oos_map: dict = None,
                             smoothing_step_days: int = 2,
-                            smoothing_samples: int = 7):
+                            smoothing_samples: int = 7,
+                            max_positions: int = None):
     """
     Findet die beste Kombination von Strategien (Max DD <= target_max_dd, kein Coin doppelt).
     Greedy-Algorithmus — ausschließlich auf OOS-Periode (trade_start_date).
@@ -67,6 +68,12 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
         Timeframe pro Symbol bevorzugt wird) basiert auf dem Mittel mehrerer
         versetzter Trailing-Snapshots statt nur dem aktuellen Stichtag.
         smoothing_samples=1 schaltet die Glaettung aus (altes Verhalten).
+    max_positions: harte Obergrenze fuer die Groesse des zurueckgegebenen
+        Portfolios (settings.json::max_open_positions). Muss HIER in der
+        Greedy-Schleife durchgesetzt werden, nicht erst hinterher per
+        optimal_portfolio[:max_positions] beim Aufrufer -- sonst simuliert
+        final_result (PnL/MaxDD/Endkapital) ein groesseres, in Wahrheit nie
+        aktivertes Portfolio als tatsaechlich in settings.json landet.
     """
     print(f"\n--- Starte Portfolio-Optimierung: Max DD <= {target_max_dd:.2f}% & ohne Coin-Kollisionen ---")
     target_max_dd_decimal = target_max_dd / 100.0
@@ -149,6 +156,8 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     best_portfolio_pnl = float('-inf')
 
     for candidate in single_strategy_results:
+        if max_positions is not None and len(portfolio_files) >= max_positions:
+            break
         coin = candidate['symbol'].split('/')[0]
         if coin in used_symbols:
             continue
