@@ -30,6 +30,23 @@ secrets_cache = None
 # bereits bestehenden fee_pct-Pauschalannahme (0.06% Taker).
 FUNDING_RATE_PCT_PER_8H = 0.01
 
+_strategy_overrides_cache = None
+
+
+def get_strategy_overrides():
+    """settings.json::strategy_overrides (z.B. sl_bricks_back) -- live mischt run.py::load_config
+    diese Werte in JEDE Config. Bisher fehlten sie in allen Backtest-Pfaden (Optimizer,
+    show_results, Portfolio-Optimizer, OOS/Walk-Forward) -> dort lief z.B. sl_bricks_back=1
+    statt live 2. Einmal pro Prozess gelesen."""
+    global _strategy_overrides_cache
+    if _strategy_overrides_cache is None:
+        try:
+            with open(os.path.join(PROJECT_ROOT, 'settings.json'), 'r') as f:
+                _strategy_overrides_cache = json.load(f).get('strategy_overrides', {}) or {}
+        except Exception:
+            _strategy_overrides_cache = {}
+    return _strategy_overrides_cache
+
 
 def _count_funding_events(entry_time, exit_time):
     """Zaehlt Bitget-Funding-Zeitpunkte (00:00/08:00/16:00 UTC) im Intervall
@@ -315,6 +332,8 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     fill_model='brick' = alte Konvention: Fills zum synthetischen Brick-Preis. Real nicht
     handelbar (faktisch Lookahead, siehe oraclebot) -- nur noch fuer Vergleiche."""
     real_fills = (fill_model == 'real')
+    # Live-Parity: gleiche Overrides wie run.py::load_config (Overrides gewinnen)
+    strategy_params = {**strategy_params, **get_strategy_overrides()}
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
