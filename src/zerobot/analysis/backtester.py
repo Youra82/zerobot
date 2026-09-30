@@ -280,7 +280,11 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
             req_start     = pd.to_datetime(start_date_str, utc=True)
             req_end       = pd.to_datetime(end_date_str, utc=True)
             req_start_buf = req_start - pd.Timedelta(days=20)
-            if data_start <= req_start_buf and data_end >= req_end:
+            # data_start <= req_start genuegt auch: Symbole, die erst kurz vor req_start
+            # gelistet wurden (ARB ab 2023-03-23 bei train_start 2023-04-01), haben den
+            # 20-Tage-Puffer nie -- sonst gilt der Cache ewig als unvollstaendig und jede
+            # Analyse laedt die komplette Historie neu (ohne API: Config uebersprungen).
+            if (data_start <= req_start_buf or data_start <= req_start) and data_end >= req_end:
                 return data.loc[req_start_buf:req_end]
         except Exception:
             try:

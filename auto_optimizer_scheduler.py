@@ -133,7 +133,11 @@ def _live_capital(fallback):
         if total > 0:
             return round(total, 2)
     except Exception as e:
-        _log(f"LIVE_CAPITAL_ERROR {e} -- nutze settings start_capital={fallback}")
+        _log(f"LIVE_CAPITAL_ERROR {e}")
+    # Rueckfall nie unter 100 USDT: mit dem alten settings-Wert 10 fallen fast alle
+    # simulierten Orders unter das Mindest-Notional und die Auswahl wird zufaellig.
+    fallback = max(float(fallback or 0), 100.0)
+    _log(f"LIVE_CAPITAL_FALLBACK nutze {fallback}")
     return fallback
 
 
