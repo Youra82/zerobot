@@ -5,27 +5,12 @@
         "active_strategies": [
             {
                 "symbol": "DOT/USDT:USDT",
-                "timeframe": "2h",
+                "timeframe": "6h",
                 "active": true
             },
             {
                 "symbol": "XRP/USDT:USDT",
-                "timeframe": "1h",
-                "active": true
-            },
-            {
-                "symbol": "ADA/USDT:USDT",
-                "timeframe": "2h",
-                "active": true
-            },
-            {
-                "symbol": "SOL/USDT:USDT",
-                "timeframe": "2h",
-                "active": true
-            },
-            {
-                "symbol": "ARB/USDT:USDT",
-                "timeframe": "1h",
+                "timeframe": "4h",
                 "active": true
             },
             {
@@ -34,8 +19,13 @@
                 "active": true
             },
             {
-                "symbol": "LINK/USDT:USDT",
-                "timeframe": "2h",
+                "symbol": "LTC/USDT:USDT",
+                "timeframe": "4h",
+                "active": true
+            },
+            {
+                "symbol": "SHIB/USDT:USDT",
+                "timeframe": "4h",
                 "active": true
             }
         ]

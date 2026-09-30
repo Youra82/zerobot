@@ -20,9 +20,12 @@ from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from zerobot.analysis.backtester import load_data, run_backtest, load_all_configs, FINE_TF_MAP
+from zerobot.analysis.backtester import (load_data, run_backtest, load_all_configs,
+                                         load_active_configs, FINE_TF_MAP)
 
-load_configs = load_all_configs
+# Standard: nur die aktiven Strategien aus settings.json (das live gehandelte Portfolio).
+# --all-configs: alle Configs (simuliert die woechentliche Auswahl aus dem ganzen Pool).
+load_configs = load_active_configs
 
 LOOKBACK_WINDOWS = [1, 2, 4, 8, 12, 26]  # Wochen
 WARMUP_WEEKS    = 16  # Indikator-Warmup: 16×7=112 Daily-Kerzen > 100-Kerzen-Threshold
@@ -457,12 +460,20 @@ def main():
     parser.add_argument('--min-trades',  type=int,   default=5,
                         help='Min. Trades pro Config im IS-Fenster [Standard: 5]')
     parser.add_argument('--no-telegram', action='store_true')
+    parser.add_argument('--all-configs', action='store_true',
+                        help='Alle Configs statt nur der aktiven Strategien aus settings.json')
     args = parser.parse_args()
 
-    configs = load_configs()
+    configs = load_all_configs() if args.all_configs else load_configs()
     if not configs:
-        print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
+        if args.all_configs:
+            print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
+        else:
+            print("Keine aktiven Strategien (mit Config) in settings.json. Zuerst "
+                  "auto_optimizer_scheduler.py --force ausführen oder --all-configs nutzen.")
         return
+    print(f"  Strategien-Pool ({'alle Configs' if args.all_configs else 'aktiv in settings.json'}): "
+          f"{', '.join(c[1]['market']['symbol'].split('/')[0] + ' ' + c[1]['market']['timeframe'] for c in configs)}")
 
     # ── Dark Period: aus Config-Metadata oder manuell
     dark = detect_dark_period(configs)
