@@ -63,11 +63,24 @@ fi
 # OOS-Start aus last_oos_run.json als Default (falls vorhanden)
 OOS_DEFAULT=$($PYTHON -c "
 import json, os, sys
-f = os.path.join('$SCRIPT_DIR', 'artifacts', 'results', 'last_oos_run.json')
-try:
-    print(json.load(open(f)).get('oos_start', '2024-01-01'))
-except:
-    print('2024-01-01')
+import glob
+# OOS-Start steht (von oos_tester.py geschrieben) in den Configs selbst -- reist per
+# git/update.sh mit. last_oos_run.json nur als Rueckfall (lokal, nicht im Repo).
+starts = []
+for p in glob.glob(os.path.join('$SCRIPT_DIR', 'src', 'zerobot', 'strategy', 'configs', 'config_*.json')):
+    try:
+        s = json.load(open(p)).get('_meta', {}).get('oos_start')
+        if s: starts.append(s)
+    except Exception:
+        pass
+if starts:
+    print(max(starts))
+else:
+    f = os.path.join('$SCRIPT_DIR', 'artifacts', 'results', 'last_oos_run.json')
+    try:
+        print(json.load(open(f)).get('oos_start', '2024-01-01'))
+    except Exception:
+        print('2024-01-01')
 " 2>/dev/null || echo "2024-01-01")
 
 echo ""

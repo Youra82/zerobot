@@ -557,23 +557,39 @@ def run_interactive_chart():
     # OOS-Modus: Warmup-Start fuer korrekten Brick-State (optional)
     warmup_start    = None
     trade_start_date = None
+    # Vorschlag primaer aus den Configs (_meta.train_start / oos_start, reisen per git
+    # mit), last_oos_run.json nur als Rueckfall (lokal, nach update.sh evtl. fehlend).
+    suggested_ws, suggested_oos = '', ''
+    try:
+        _cfg_dir = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
+        _metas = []
+        for _fn in os.listdir(_cfg_dir):
+            if _fn.startswith('config_') and _fn.endswith('.json'):
+                with open(os.path.join(_cfg_dir, _fn)) as f:
+                    _metas.append(json.load(f).get('_meta', {}))
+        _ws  = [m['train_start'] for m in _metas if m.get('train_start')]
+        _oos = [m['oos_start'] for m in _metas if m.get('oos_start')]
+        if _ws and _oos:
+            suggested_ws, suggested_oos = min(_ws), max(_oos)
+    except Exception:
+        pass
     oos_file = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'last_oos_run.json')
-    if os.path.exists(oos_file):
+    if not (suggested_ws and suggested_oos) and os.path.exists(oos_file):
         try:
             with open(oos_file) as f:
                 oos_data = json.load(f)
             suggested_ws  = oos_data.get('warmup_start', '')
             suggested_oos = oos_data.get('oos_start', '')
-            if suggested_ws and suggested_oos:
-                print(f'\n  Letzter OOS-Test erkannt:')
-                print(f'  Warmup ab: {suggested_ws}  |  OOS ab: {suggested_oos}')
-                raw = input('  OOS-Modus aktivieren? (j/n) [Standard: n]: ').strip().lower()
-                if raw in ('j', 'y', 'ja', 'yes'):
-                    warmup_start     = suggested_ws
-                    trade_start_date = suggested_oos
-                    print(f'  {GREEN}OOS-Modus aktiv: Warmup={warmup_start}, Trades ab={trade_start_date}{NC}')
         except Exception:
             pass
+    if suggested_ws and suggested_oos:
+        print(f'\n  Letzter OOS-Test erkannt:')
+        print(f'  Warmup ab: {suggested_ws}  |  OOS ab: {suggested_oos}')
+        raw = input('  OOS-Modus aktivieren? (j/n) [Standard: n]: ').strip().lower()
+        if raw in ('j', 'y', 'ja', 'yes'):
+            warmup_start     = suggested_ws
+            trade_start_date = suggested_oos
+            print(f'  {GREEN}OOS-Modus aktiv: Warmup={warmup_start}, Trades ab={trade_start_date}{NC}')
     if warmup_start is None:
         raw = input('\nWarmup-Startdatum fuer OOS-Modus (JJJJ-MM-TT) [leer=aus]: ').strip()
         if raw:
