@@ -43,6 +43,42 @@ def load_brick_state(symbol_timeframe: str) -> dict:
     return {}
 
 
+def closed_candles_only(df, timeframe: str):
+    """Entfernt die noch laufende Kerze. Bitget liefert sie bei fetch_ohlcv mit --
+    ohne Filter verarbeitete der Cron (z.B. 16:01) die 16:00-Kerze mit ihrem
+    1-Minuten-'Close', setzte last_processed_ts=16:00 und sah den echten Schlusskurs
+    nie. Backtest rechnet nur mit abgeschlossenen Kerzen."""
+    if df is None or df.empty:
+        return df
+    now = pd.Timestamp.now(tz='UTC')
+    return df[df.index + pd.Timedelta(timeframe) <= now]
+
+
+def backtest_warmup_start(train_start) -> str:
+    """Erster Tag der Backtest-Kette: backtester.load_data liefert Daten ab
+    train_start - 20 Tage. Live/Referenz muessen am selben Anker starten, sonst
+    entsteht eine dauerhaft andere (pfadabhaengige) Renko-Kette."""
+    return (pd.Timestamp(train_start) - pd.Timedelta(days=20)).strftime('%Y-%m-%d')
+
+
+def build_chain_like_backtest(df, strat_params: dict):
+    """Baut die Brick-Kette mit exakt der Vorverarbeitung von backtester.run_backtest
+    (ATR(14), NaN-Zeilen verwerfen, dann _build_bricks). Gemeinsam genutzt von
+    Live-Bootstrap, init_brick_states.py und check_brick_sync.py.
+    Gibt (bricks, verarbeitete Daten) zurueck."""
+    d = df.copy()
+    d['atr'] = ta.volatility.AverageTrueRange(
+        high=d['high'], low=d['low'], close=d['close'], window=14).average_true_range()
+    d.dropna(subset=['atr'], inplace=True)
+    return EAREngine(settings=strat_params)._build_bricks(d), d
+
+
+# Version der Kettenlogik: erhoehen, wenn sich die Konstruktion aendert -> alle
+# persistierten Ketten werden automatisch einmal neu gebaut
+# (v2: nur abgeschlossene Kerzen + gleicher Anker/ATR-Vorlauf wie der Backtester).
+BRICK_CHAIN_VERSION = 2
+
+
 def brick_chain_params(strat_params: dict, meta: dict) -> dict:
     """Parameter, von denen die Brick-Kette abhaengt. Wird im State gespeichert:
     weicht er von der aktuellen Config ab (z.B. neue Pipeline-Optimierung mit
@@ -54,6 +90,7 @@ def brick_chain_params(strat_params: dict, meta: dict) -> dict:
         'k_entropy':   round(float(strat_params.get('k_entropy', 0.8)), 6),
         'h_window':    int(strat_params.get('h_window', 10)),
         'train_start': (meta or {}).get('train_start'),
+        'version':     BRICK_CHAIN_VERSION,
     }
 
 
@@ -72,13 +109,14 @@ def _bootstrap_brick_chain(exchange, symbol, timeframe, strat_params, warmup_sta
     fuer die anschliessende inkrementelle Fortsetzung. Wird automatisch
     aufgerufen wenn noch kein persistierter State existiert."""
     end_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    data = exchange.fetch_historical_ohlcv(symbol, timeframe, warmup_start, end_str)
+    data = closed_candles_only(
+        exchange.fetch_historical_ohlcv(symbol, timeframe, backtest_warmup_start(warmup_start), end_str),
+        timeframe)
     if data is None or data.empty or len(data) < 50:
         logger.error(f"Bootstrap: keine ausreichenden historischen Daten fuer {symbol} ({timeframe}).")
         return None
 
-    engine = EAREngine(settings=strat_params)
-    bricks = engine._build_bricks(data)
+    bricks, data = build_chain_like_backtest(data, strat_params)
     if not bricks:
         logger.error(f"Bootstrap: keine Bricks aus Historie fuer {symbol} ({timeframe}).")
         return None
@@ -195,8 +233,8 @@ def update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger):
     h_window = int(strat_params.get('h_window', 10))
     buffer_n = h_window + 5
 
-    buffer_data = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=buffer_n)
-    new_data    = exchange.fetch_ohlcv_since(symbol, timeframe, since_ms)
+    buffer_data = closed_candles_only(exchange.fetch_recent_ohlcv(symbol, timeframe, limit=buffer_n), timeframe)
+    new_data    = closed_candles_only(exchange.fetch_ohlcv_since(symbol, timeframe, since_ms), timeframe)
     if new_data.empty:
         return None  # keine neuen abgeschlossenen Kerzen seit dem letzten Check
 

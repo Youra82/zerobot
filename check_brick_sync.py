@@ -47,7 +47,8 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.utils.exchange import Exchange
-from zerobot.utils.trade_manager import brick_chain_params
+from zerobot.utils.trade_manager import (brick_chain_params, backtest_warmup_start,
+                                         build_chain_like_backtest)
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.strategy_list import add_orphaned_open_positions as _add_orphaned_open_positions
 
@@ -57,9 +58,11 @@ CONFIGS_DIR    = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'confi
 RESULTS_FILE   = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'optimization_results.json')
 PENDING_PREFIX = os.path.join(DB_PATH, 'brick_sync_pending_')
 
-STALE_CACHE_SLACK_DAYS = 2  # wie weit die aelteste gecachte Kerze maximal nach
-                            # train_start liegen darf, bevor der Cache als
-                            # unvollstaendig verworfen und komplett neu geladen wird
+STALE_CACHE_SLACK_DAYS = 15  # wie weit die aelteste gecachte Kerze maximal nach dem
+                             # Anker (train_start - 20 Tage) liegen darf, bevor der Cache
+                             # als unvollstaendig verworfen und neu geladen wird. 15 statt 2:
+                             # spaet gelistete Symbole (ARB: 11 Tage nach Anker) sonst nie
+                             # gueltig; alte Caches ab train_start (20 Tage) werden verworfen.
 
 
 def setup_logging():
@@ -192,22 +195,25 @@ def build_reference_chain(exchange, symbol, timeframe, strat_params, train_start
     verdaechtig weit von train_start entfernt -- lieber None (= 'unzuverlaessig,
     ueberspringen') als eine kaputte Referenz, gegen die faelschlich alarmiert
     oder sogar korrigiert wuerde."""
-    df = load_full_ohlcv(exchange, symbol, timeframe, train_start, logger)
+    # Gleicher Anker wie der Backtester (train_start - 20 Tage, dann ATR-Vorlauf) --
+    # vorher ab train_start ohne ATR-Vorlauf, d.h. die "Korrektur" zog die Live-Kette
+    # auf eine Kette, die NICHT die Backtest-Kette ist.
+    anchor = backtest_warmup_start(train_start)
+    df = load_full_ohlcv(exchange, symbol, timeframe, anchor, logger)
     if df.empty:
         return None
     df = df[df.index <= up_to_ts]
 
-    train_start_ts = pd.Timestamp(train_start, tz='UTC')
-    if df.empty or df.index.min() > train_start_ts + pd.Timedelta(days=STALE_CACHE_SLACK_DAYS):
+    anchor_ts = pd.Timestamp(anchor, tz='UTC')
+    if df.empty or df.index.min() > anchor_ts + pd.Timedelta(days=STALE_CACHE_SLACK_DAYS):
         logger.warning(f"{symbol} ({timeframe}): Referenzdaten beginnen erst bei "
-                      f"{df.index.min() if not df.empty else 'n/a'}, erwartet ab {train_start_ts} "
+                      f"{df.index.min() if not df.empty else 'n/a'}, erwartet ab {anchor_ts} "
                       f"-- vermutlich unvollstaendiger Fetch (Rate-Limit?), Referenz verworfen.")
         return None
 
     if len(df) < 20:
         return None
-    engine = EAREngine(settings=strat_params)
-    bricks = engine._build_bricks(df)
+    bricks, _ = build_chain_like_backtest(df, strat_params)
     if not bricks:
         return None
     return bricks

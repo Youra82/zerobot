@@ -61,7 +61,8 @@ def _load_active_pairs() -> set | None:
 def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
     from zerobot.analysis.backtester import load_data
     from zerobot.strategy.ear_engine import EAREngine
-    from zerobot.utils.trade_manager import brick_chain_params
+    from zerobot.utils.trade_manager import (brick_chain_params, closed_candles_only,
+                                             build_chain_like_backtest)
 
     os.makedirs(DB_DIR, exist_ok=True)
 
@@ -123,22 +124,16 @@ def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
                 continue
 
             print(f'  Lade  {symbol} / {timeframe}  ab {warmup}...', end=' ', flush=True)
-            data = load_data(symbol, timeframe, warmup, today)
+            # load_data liefert ab train_start - 20 Tage (= Backtest-Anker); laufende
+            # Kerze verwerfen, sonst wird deren Momentan-"Close" persistiert
+            data = closed_candles_only(load_data(symbol, timeframe, warmup, today), timeframe)
             if data is None or data.empty or len(data) < 50:
                 print(f'{R}keine Daten{NC}')
                 errors += 1
                 continue
 
-            # ATR berechnen (wie im Backtester)
-            atr_ind = ta.volatility.AverageTrueRange(
-                high=data['high'], low=data['low'], close=data['close'], window=14)
-            data['atr'] = atr_ind.average_true_range()
-            data.dropna(subset=['atr'], inplace=True)
-
-            # Bricks aus voller Historie bauen — kein init_lc/init_direction nötig
-            strategy_params = config.get('strategy', {})
-            engine  = EAREngine(settings=strategy_params)
-            bricks  = engine._build_bricks(data)
+            # Gleiche Vorverarbeitung (ATR-Vorlauf) wie backtester.run_backtest
+            bricks, data = build_chain_like_backtest(data, config.get('strategy', {}))
 
             if not bricks:
                 print(f'{R}keine Bricks{NC}')
