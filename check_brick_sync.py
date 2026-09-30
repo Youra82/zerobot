@@ -47,6 +47,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.utils.exchange import Exchange
+from zerobot.utils.trade_manager import brick_chain_params
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.strategy_list import add_orphaned_open_positions as _add_orphaned_open_positions
 
@@ -440,6 +441,8 @@ def run(dry_run=False):
             'direction': ref_dir,
             'last_processed_ts': live['last_processed_ts'],
             'recent_bricks': [[b['direction'], b['close']] for b in ref_bricks[-20:]],
+            # sonst haelt update_brick_chain die korrigierte Kette fuer veraltet und baut neu
+            'params': brick_chain_params(strat, cfg.get('_meta', {})),
         }
 
         if dry_run:

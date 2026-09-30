@@ -43,6 +43,20 @@ def load_brick_state(symbol_timeframe: str) -> dict:
     return {}
 
 
+def brick_chain_params(strat_params: dict, meta: dict) -> dict:
+    """Parameter, von denen die Brick-Kette abhaengt. Wird im State gespeichert:
+    weicht er von der aktuellen Config ab (z.B. neue Pipeline-Optimierung mit
+    anderem base_pct), ist die persistierte Kette ungueltig und wird neu gebaut --
+    sonst setzt live eine mit alten Brick-Groessen gebaute Kette fort, die nicht
+    zur Backtest-Kette der neuen Config passt."""
+    return {
+        'base_pct':    round(float(strat_params.get('base_pct', 0.004)), 6),
+        'k_entropy':   round(float(strat_params.get('k_entropy', 0.8)), 6),
+        'h_window':    int(strat_params.get('h_window', 10)),
+        'train_start': (meta or {}).get('train_start'),
+    }
+
+
 def save_brick_state(symbol_timeframe: str, state: dict):
     """Speichert kompletten Brick-State (lc, direction, last_processed_ts,
     recent_bricks) fuer den naechsten Lauf -- damit setzt die naechste
@@ -153,6 +167,11 @@ def update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger):
     # inkrementelle Fortsetzung zusaetzlich zwingend -- fehlen sie, neu bootstrapen
     # statt mit unvollstaendigem State weiterzumachen.
     required_keys = {'lc', 'direction', 'last_processed_ts', 'recent_bricks'}
+    params = brick_chain_params(strat_params, meta)
+    if state and state.get('params') != params:
+        logger.info(f"Brick-Parameter fuer {symbol_timeframe} geaendert "
+                    f"({state.get('params')} -> {params}) -- baue Kette neu auf.")
+        state = {}
     if not state or not required_keys.issubset(state.keys()):
         warmup_start = (meta or {}).get('train_start')
         if not warmup_start:
@@ -164,6 +183,7 @@ def update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger):
         state = _bootstrap_brick_chain(exchange, symbol, timeframe, strat_params, warmup_start, logger)
         if state is None:
             return None
+        state['params'] = params
         save_brick_state(symbol_timeframe, state)
         logger.info(f"Brick-State initialisiert: lc={state['lc']:.6f} dir={state['direction']}")
 
@@ -213,6 +233,7 @@ def update_brick_chain(exchange, symbol, timeframe, strat_params, meta, logger):
         'direction': new_direction,
         'last_processed_ts': new_only.index[-1].isoformat(),
         'recent_bricks': [list(x) for x in combined_recent],
+        'params': params,
     }
     save_brick_state(symbol_timeframe, new_state)
 

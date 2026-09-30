@@ -61,6 +61,7 @@ def _load_active_pairs() -> set | None:
 def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
     from zerobot.analysis.backtester import load_data
     from zerobot.strategy.ear_engine import EAREngine
+    from zerobot.utils.trade_manager import brick_chain_params
 
     os.makedirs(DB_DIR, exist_ok=True)
 
@@ -99,10 +100,20 @@ def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
                 continue
 
             state_file = _state_path(symbol, timeframe)
+            params = brick_chain_params(config.get('strategy', {}), config.get('_meta', {}))
             if not force and os.path.exists(state_file):
-                print(f'  {Y}→ Skip{NC}  {symbol} / {timeframe}  (State vorhanden, --force zum Überschreiben)')
-                skipped += 1
-                continue
+                try:
+                    with open(state_file) as f:
+                        existing_params = json.load(f).get('params')
+                except Exception:
+                    existing_params = None
+                # Nur ueberspringen, wenn die Kette mit DENSELBEN Brick-Parametern gebaut
+                # wurde -- nach einer Pipeline-Neuoptimierung wird sie automatisch neu gebaut.
+                if existing_params == params:
+                    print(f'  {Y}→ Skip{NC}  {symbol} / {timeframe}  (State aktuell, --force zum Überschreiben)')
+                    skipped += 1
+                    continue
+                print(f'  {Y}→ Brick-Parameter geändert{NC}  {symbol} / {timeframe}  -- baue neu')
 
             # Daten ab _meta.train_start laden (volle Historie = korrekte Brick-Level)
             warmup = config.get('_meta', {}).get('train_start')
@@ -141,6 +152,7 @@ def init_brick_states(all_configs: bool = False, force: bool = False) -> int:
                 'direction': last['direction'],
                 'last_processed_ts': data.index[-1].isoformat(),
                 'recent_bricks': recent,
+                'params': params,
             }
             with open(state_file, 'w') as f:
                 json.dump(state, f)
