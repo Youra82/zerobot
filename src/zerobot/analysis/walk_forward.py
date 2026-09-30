@@ -194,8 +194,105 @@ def select_portfolio(configs, cache, is_start, is_end, max_dd_pct,
     return list(symbol_best.values())
 
 
+def collect_continuous_trades(configs, end_str, capital):
+    """Eine durchgehende Backtest-Kette pro Strategie ab dem Pipeline-Anker
+    (_meta.train_start, wie live und show_results) -- Rueckgabe {fn: (cfg, trades)},
+    trades = Liste (entry_ts, exit_ts, rendite) mit rendite = pnl_usd / Kapital vor
+    dem Trade (inkl. Fees/Funding).
+
+    Vorher rechnete der Walk-Forward jede Woche einen eigenen Backtest ab
+    'Woche - Warmup': die Brick-Kette startete jede Woche an einem anderen Anker
+    (andere Kette als live) und Trades, die ueber das Wochenende hinaus offen
+    waren, fielen komplett weg (EAR-Trades auf 4h/6h laufen oft Tage)."""
+    out = {}
+    for fn, cfg in configs:
+        sym = cfg['market']['symbol']
+        tf  = cfg['market']['timeframe']
+        start = cfg.get('_meta', {}).get('train_start', '2023-01-01')
+        data = load_data(sym, tf, start, end_str)
+        if data is None or data.empty:
+            continue
+        strat = dict(cfg.get('strategy', {}))
+        strat.update(symbol=sym, timeframe=tf)
+        try:
+            res = run_backtest(data.copy(), strat, cfg.get('risk', {}), capital,
+                               verbose=False, return_trades=True)
+        except Exception:
+            continue
+        trades = []
+        for t in res.get('trades', []):
+            before = t['capital_after'] - t['pnl_usd']
+            if before > 0:
+                trades.append((pd.to_datetime(t['entry_time'], utc=True),
+                               pd.to_datetime(t['exit_time'], utc=True),
+                               t['pnl_usd'] / before))
+        out[fn] = (cfg, trades)
+    return out
+
+
+def _window_stats(trades, start, end):
+    """PnL% / MaxDD% / Anzahl der Trades mit Entry in [start, end), verkettet."""
+    eq, peak, dd, n = 1.0, 1.0, 0.0, 0
+    for entry, _, ret in trades:
+        if start <= entry < end:
+            eq *= (1 + ret)
+            peak = max(peak, eq)
+            dd = max(dd, (peak - eq) / peak)
+            n += 1
+    return (eq - 1) * 100, dd * 100, n
+
+
 def run_walk_forward(configs, cache, lookback_weeks, week_starts, capital,
                      max_dd_pct, min_trades=2, fine_cache=None):
+    """
+    Simuliert den woechentlichen Auto-Optimizer so, wie der Live-Bot handelt:
+    cache = collect_continuous_trades(...). Jede Woche wird pro Symbol die beste
+    Strategie (Calmar ueber die Trades im Lookback-Fenster) gewaehlt; sie darf in
+    dieser Woche neue Trades eroeffnen, die bis zu ihrem echten Exit laufen
+    (live verwaltet der Bot offene Positionen auch nach einer Abwahl weiter).
+    Returns: (curve, empty_weeks, total_trades, total_wins)
+    """
+    equity, curve, empty_weeks, total_trades, total_wins = capital, [], 0, 0, 0
+    for week_start in week_starts:
+        is_start = week_start - timedelta(weeks=lookback_weeks)
+        oos_end  = week_start + timedelta(weeks=1)
+
+        best = {}
+        for fn, (cfg, trades) in cache.items():
+            pnl, dd, n = _window_stats(trades, is_start, week_start)
+            if n < min_trades or pnl <= 0 or dd > max_dd_pct:
+                continue
+            calmar = compute_calmar(pnl, dd)
+            sym = cfg['market']['symbol']
+            if sym not in best or calmar > best[sym][0]:
+                best[sym] = (calmar, fn)
+
+        if not best:
+            empty_weeks += 1
+            curve.append((oos_end, equity, 0, 0))
+            continue
+
+        cap_each = equity / len(best)
+        wk_pnl, wk_trades, wk_wins = 0.0, 0, 0
+        for _, fn in best.values():
+            c = cap_each
+            for entry, _, ret in cache[fn][1]:
+                if week_start <= entry < oos_end:
+                    c *= (1 + ret)
+                    wk_trades += 1
+                    wk_wins += ret > 0
+            wk_pnl += c - cap_each
+        equity = max(equity + wk_pnl, 0.0)
+        curve.append((oos_end, equity, len(best), wk_trades))
+        total_trades += wk_trades
+        total_wins   += wk_wins
+    return curve, empty_weeks, total_trades, total_wins
+
+
+def _run_walk_forward_weekly_restart(configs, cache, lookback_weeks, week_starts, capital,
+                                     max_dd_pct, min_trades=2, fine_cache=None):
+    """Alte Variante (Kette startet jede Woche neu, Trades am Wochenende abgeschnitten)
+    -- nicht mehr genutzt, nur als Referenz."""
     """
     Simuliert wöchentlichen Auto-Optimizer mit N Wochen Lookback.
     Returns: (curve, empty_weeks, total_trades, total_wins)
@@ -541,13 +638,12 @@ def main():
     full_end_str  = oos_end_str
     full_start_str = full_start_dt.strftime('%Y-%m-%d')
 
-    print("  Lade Marktdaten...")
-    cache = preload_data(configs, full_start_str, full_end_str)
+    print("  Berechne durchgehende Backtest-Ketten pro Strategie (wie live)...")
+    cache = collect_continuous_trades(configs, full_end_str, args.capital)
     if not cache:
         print(f"  {R}Keine Daten geladen.{NC}")
         return
-
-    fine_cache = preload_fine_data(configs, full_start_str, full_end_str)
+    fine_cache = None
 
     # ── OOS-Zeitraum (alle Lookbacks auf gleichem Zeitraum)
     oos_start_dt = pd.to_datetime(oos_start_str, utc=True)
