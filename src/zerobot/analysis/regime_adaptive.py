@@ -2,6 +2,10 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+try:
+    import ta   # main() prueft 'if ta is None' -- Import fehlte, Modus 18 stuerzte mit NameError ab
+except ImportError:
+    ta = None
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
