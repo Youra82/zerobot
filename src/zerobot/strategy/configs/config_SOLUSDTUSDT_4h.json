@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "SOL/USDT:USDT",
+        "timeframe": "4h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0084,
+        "k_entropy": 0.493,
+        "h_window": 7,
+        "trend_min_bricks": 2
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 0.92,
+        "leverage": 8
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 60.17,
+        "optimized_at": "2026-09-30T19:15:45",
+        "train_start": "2023-04-01",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": 2.27
+    }
+}
