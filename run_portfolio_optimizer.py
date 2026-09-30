@@ -78,21 +78,27 @@ def _load_oos_info() -> tuple:
                     oos_starts.append(meta['oos_start'])
                 if meta.get('train_start'):
                     warmup_starts.append(meta['train_start'])
+                # OOS-Ergebnis steht (von oos_tester.py geschrieben) in der Config selbst --
+                # reist damit per git/update.sh mit, last_oos_run.json dagegen nicht.
+                if meta.get('oos_pnl_pct') is not None:
+                    oos_map[fn] = {'config_file': fn, 'oos_pnl': meta['oos_pnl_pct']}
             except Exception:
                 pass
 
-    # 2. last_oos_run.json als zusätzliche Quelle + oos_map aufbauen
+    # 2. last_oos_run.json nur als Ergaenzung: fuellt Configs ohne OOS-_meta auf. Sein
+    #    oos_start zaehlt nur, wenn keine Config einen hat -- sonst kann eine veraltete
+    #    Datei (anderer Pipeline-Lauf) den OOS-Start verschieben.
     if os.path.exists(OOS_FILE):
         try:
             with open(OOS_FILE) as f:
                 data = json.load(f)
-            if data.get('oos_start'):
+            if data.get('oos_start') and not oos_starts:
                 oos_starts.append(data['oos_start'])
-            if data.get('warmup_start'):
+            if data.get('warmup_start') and not warmup_starts:
                 warmup_starts.append(data['warmup_start'])
             for r in data.get('results', []):
                 cfg_file = r.get('config_file', '')
-                if cfg_file:
+                if cfg_file and cfg_file not in oos_map:
                     oos_map[cfg_file] = r
         except Exception:
             pass

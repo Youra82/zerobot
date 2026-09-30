@@ -118,8 +118,27 @@ def _send_telegram_plain(message: str):
         _log(f"TELEGRAM ERROR {e}")
 
 
+def _live_capital(fallback):
+    """Echter Kontostand (USDT gesamt) als Simulationskapital. Mit einem zu kleinen
+    Pauschalwert (settings start_capital=10) scheitert jeder simulierte Trade an
+    Bitgets Mindest-Notional von 5 USDT -> 0 Trades, 0% PnL fuer alle Strategien,
+    und die Portfolio-Auswahl wird zufaellig. Fallback: settings-Wert."""
+    try:
+        sys.path.insert(0, os.path.join(PROJECT_ROOT, 'src'))
+        from zerobot.utils.exchange import Exchange
+        with open(os.path.join(PROJECT_ROOT, 'secret.json')) as f:
+            account = json.load(f)['zerobot'][0]
+        bal   = Exchange(account).exchange.fetch_balance({'productType': 'USDT-FUTURES'})
+        total = float((bal.get('USDT') or {}).get('total') or 0)
+        if total > 0:
+            return round(total, 2)
+    except Exception as e:
+        _log(f"LIVE_CAPITAL_ERROR {e} -- nutze settings start_capital={fallback}")
+    return fallback
+
+
 def _run_portfolio_optimizer(opt_settings: dict) -> int:
-    capital    = str(opt_settings.get('start_capital', 100))
+    capital    = str(_live_capital(opt_settings.get('start_capital', 100)))
     max_dd     = str(opt_settings.get('constraints', {}).get('max_drawdown_pct', 30))
     start_date = opt_settings.get('start_date', 'auto')
     end_date   = opt_settings.get('end_date',   'auto')
