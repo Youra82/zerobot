@@ -138,13 +138,15 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
                 # systematisch vor einer mit aehnlichem PnL aber viel kleinerem
                 # Drawdown -- siehe optimizer.py::objective fuer die volle
                 # Begruendung desselben Musters.
-                sort_score = _calmar(result['total_pnl_pct'], result['max_drawdown_pct'])
+                # Ranking nach PnL: das MaxDD-Limit (Standard 30%) ist die einzige Risiko-
+                # Grenze und soll ausgeschoepft werden (vorher Calmar -> Stopp bei ~3% DD).
+                sort_score = result['total_pnl_pct']
                 if use_smoothing:
                     smoothed_pnl = _smoothed_score(
                         strat_data, start_capital, trade_start_date, end_date,
                         smoothing_step_days, smoothing_samples)
                     if smoothed_pnl is not None:
-                        sort_score = _calmar(smoothed_pnl, result['max_drawdown_pct'])
+                        sort_score = smoothed_pnl
                 single_strategy_results.append({
                     'filename':    filename,
                     'symbol':      strat_data['symbol'],
@@ -171,6 +173,7 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     used_symbols          = set()
     best_portfolio_sim    = None
     best_portfolio_calmar = float('-inf')
+    best_portfolio_pnl    = 0.0   # nur aufnehmen, was den Portfolio-PnL erhoeht
 
     for candidate in single_strategy_results:
         if max_positions is not None and len(portfolio_files) >= max_positions:
@@ -196,12 +199,16 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
         # replay_portfolio_events: Positionen konkurrieren um dieselbe Equity).
         # Calmar statt rohem PnL-Vergleich aus demselben Grund wie beim
         # Einzelstrategie-Ranking oben.
-        if actual_dd <= target_max_dd_decimal and candidate_calmar >= best_portfolio_calmar:
+        # Aufnahme, solange der Portfolio-PnL steigt und MaxDD <= Limit bleibt -- das
+        # Limit wird ausgeschoepft statt per Calmar bei kleinem DD zu stoppen.
+        candidate_pnl = result.get('total_pnl_pct', float('-inf'))
+        if actual_dd <= target_max_dd_decimal and candidate_pnl > best_portfolio_pnl:
             portfolio.append(candidate)
             portfolio_files.append(candidate['filename'])
             used_symbols.add(coin)
             best_portfolio_sim = result
             best_portfolio_calmar = candidate_calmar
+            best_portfolio_pnl = candidate_pnl
             print(f"  + {candidate['symbol']} / {candidate['timeframe']} "
                   f"(PnL: {result['total_pnl_pct']:.1f}%, MaxDD: {result['max_drawdown_pct']:.1f}%)")
 
@@ -228,8 +235,8 @@ def run_portfolio_optimizer(start_capital, strategies_data, start_date, end_date
     # aber konzentriertem Risiko soll nicht automatisch vor einem
     # diversifizierten Portfolio mit aehnlichem PnL aber besserem Drawdown
     # gewinnen (siehe optimizer.py::objective fuer die volle Begruendung).
-    if best_single_calmar > best_portfolio_calmar:
-        print(f"\n  ★ Einzelstrategie schlägt Portfolio (Calmar):")
+    if best_single_pnl > portfolio_pnl:
+        print(f"\n  ★ Einzelstrategie schlägt Portfolio (PnL):")
         print(f"    {best_single['symbol']} {best_single['timeframe']}: {best_single_pnl:+.1f}% "
               f"(Calmar {best_single_calmar:.2f})  >  "
               f"Portfolio ({len(portfolio_files)} Strategien): {portfolio_pnl:+.1f}% (Calmar {best_portfolio_calmar:.2f})")
