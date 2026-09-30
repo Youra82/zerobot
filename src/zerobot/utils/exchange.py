@@ -139,7 +139,22 @@ class Exchange:
                 # Timeframes (1m/5m/15m) zu systematischen ~8-Tage-Luecken (74% der
                 # Kerzen fehlten in einem beobachteten 3-Monats-Fetch). Siehe auch
                 # ltbbot/mbot/vbot/fibot/dnabot, die bereits korrekt mit 200 arbeiten.
-                ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=200)
+                try:
+                    ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=200)
+                except (ccxt.RateLimitExceeded, ccxt.NetworkError) as e:
+                    # Ein einzelner 429/Netzwerkfehler warf bisher den kompletten Fetch weg
+                    # (except unten -> leerer DataFrame). Kurz warten und dieselbe Page wiederholen.
+                    if empty_retries < 5:
+                        empty_retries += 1
+                        time.sleep(5.0 * empty_retries)
+                        continue
+                    raise
+                if not ohlcv and not all_ohlcv:
+                    # Start vor dem Listing des Symbols (z.B. ARB, train_start 2023-03-01):
+                    # leere Pages bis zur ersten Kerze sind kein Ende der Historie --
+                    # vorspulen statt abbrechen (sonst schlagen Backtest und Live-Bootstrap fehl).
+                    start_ts += 200 * self.exchange.parse_timeframe(timeframe) * 1000
+                    continue
                 if not ohlcv:
                     # Leere Antwort kann echtes Ende der Historie sein ODER ein
                     # transienter Rate-Limit-/Netzwerk-Hickup (beobachtet: brach bei

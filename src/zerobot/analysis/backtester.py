@@ -306,7 +306,15 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 
 def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
                  fee_pct_override=None, return_trades=False,
-                 trade_start_date=None, fine_data=None, funding_rate_override=None):
+                 trade_start_date=None, fine_data=None, funding_rate_override=None,
+                 fill_model='real'):
+    """fill_model='real' (Default, = Live-Ausfuehrung in trade_manager.py): Entry per
+    Market-Order zum Close der Signalkerze, Brick-TP per Market-Order zum Close der Kerze,
+    in der der Gegenbrick entsteht (Live erkennt ihn erst nach Kerzenschluss), SL als echte
+    Trigger-Order am Brick-Level (bei Gap ueber das Level: Fill zum Open).
+    fill_model='brick' = alte Konvention: Fills zum synthetischen Brick-Preis. Real nicht
+    handelbar (faktisch Lookahead, siehe oraclebot) -- nur noch fuer Vergleiche."""
+    real_fills = (fill_model == 'real')
     if data.empty or len(data) < 100:
         return {"total_pnl_pct": -100, "trades_count": 0, "win_rate": 0,
                 "max_drawdown_pct": 1.0, "end_capital": start_capital}
@@ -375,6 +383,11 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
             # 1. Candle-Level SL (fester Preis = Open des Entry-Bricks)
             sl_hit = (current_candle['low'] <= position['stop_loss']) if position['side'] == 'long' \
                 else (current_candle['high'] >= position['stop_loss'])
+            # Gap ueber das SL-Level: Trigger-Order fuellt zum Open, nicht am Level
+            sl_fill = position['stop_loss']
+            if real_fills and sl_hit:
+                sl_fill = min(sl_fill, current_candle['open']) if position['side'] == 'long' \
+                    else max(sl_fill, current_candle['open'])
 
             # 2. Brick-Level TP: erster vollständiger Brick in Gegenrichtung
             tp_price = None
@@ -386,7 +399,15 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     tp_price = brick['close']
                     break
 
-            if sl_hit and tp_price is not None:
+            if real_fills:
+                # Live: SL-Trigger liegt an der Boerse und greift intrabar, der Brick-TP
+                # wird erst nach Kerzenschluss erkannt und zum Close ausgefuehrt -- SL hat
+                # damit immer Vorrang, es gibt keinen Ambiguitaetsfall.
+                if sl_hit:
+                    exit_price, exit_reason = sl_fill, 'sl'
+                elif tp_price is not None:
+                    exit_price, exit_reason = current_candle['close'], 'tp'
+            elif sl_hit and tp_price is not None:
                 # Beide Level in derselben Kerze moeglich -- Reihenfolge unklar
                 # ohne feinere Daten. Per fine_data (falls vorhanden) real
                 # aufloesen statt SL blind zu bevorzugen (oraclebot-Muster).
@@ -475,8 +496,18 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                 if sl_dist <= 0:
                     continue
 
+                # Sizing wie live: Risiko relativ zum Brick-Signalpreis (Order-Groesse steht
+                # vor der Market-Order fest), gefuellt wird aber zum Close der Signalkerze.
+                signal_price = entry_price
+                if real_fills:
+                    entry_price = current_candle['close']
+                    # Close bereits jenseits des SL -> Trigger wuerde sofort ausloesen
+                    if (side == 'buy' and entry_price <= sl_price) or \
+                       (side == 'sell' and entry_price >= sl_price):
+                        continue
+
                 risk_amount    = current_capital * risk_per_trade_pct
-                sl_pct         = sl_dist / entry_price
+                sl_pct         = sl_dist / signal_price
                 calc_notional  = risk_amount / sl_pct
                 max_notional   = current_capital * leverage
                 final_notional = min(calc_notional, max_notional, absolute_max_notional)
@@ -494,7 +525,7 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
                     'notional_value': final_notional,
                     'entry_time':     timestamp,
                 }
-                last_entry_price = entry_price
+                last_entry_price = entry_price  # live: trade_lock speichert den echten Fill
 
     win_rate      = (wins_count / trades_count * 100) if trades_count > 0 else 0
     final_pnl_pct = ((current_capital - start_capital) / start_capital) * 100
