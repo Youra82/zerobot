@@ -264,8 +264,14 @@ def main():
         if os.path.exists(config_output_path):
             try:
                 with open(config_output_path) as cf:
-                    existing_cfg = json.load(cf)
-                existing_pnl = existing_cfg.get('_meta', {}).get('pnl_pct')
+                    existing_meta = json.load(cf).get('_meta', {})
+                # Nur vergleichbar, wenn dieselbe Fill-Logik UND derselbe Trainingszeitraum:
+                # alte Configs haben pnl_pct aus Brick-Preis-Fills (z.B. +503249%), die ein
+                # ehrlich optimiertes Ergebnis nie erreicht -> sonst wuerde nie mehr ueberschrieben.
+                if (existing_meta.get('fill_model') == 'real'
+                        and existing_meta.get('train_start') == actual_start
+                        and existing_meta.get('train_end') == args.end_date):
+                    existing_pnl = existing_meta.get('pnl_pct')
             except Exception:
                 pass
 
@@ -300,6 +306,7 @@ def main():
                 "optimized_at":   _dt.now().isoformat(timespec='seconds'),
                 "train_start":    actual_start,
                 "train_end":      args.end_date,
+                "fill_model":     "real",
             },
         }
         with open(config_output_path, 'w') as f:
