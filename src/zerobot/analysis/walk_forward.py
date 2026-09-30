@@ -23,9 +23,10 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from zerobot.analysis.backtester import (load_data, run_backtest, load_all_configs,
                                          load_active_configs, FINE_TF_MAP)
 
-# Standard: nur die aktiven Strategien aus settings.json (das live gehandelte Portfolio).
-# --all-configs: alle Configs (simuliert die woechentliche Auswahl aus dem ganzen Pool).
-load_configs = load_active_configs
+# Standard: alle Configs -- der woechentliche Scheduler waehlt jede Woche neu aus dem
+# ganzen Pool, die aktiven Strategien koennen also wechseln.
+# --active-only: nur die aktuell aktiven Strategien aus settings.json.
+load_configs = load_all_configs
 
 LOOKBACK_WINDOWS = [1, 2, 4, 8, 12, 26]  # Wochen
 WARMUP_WEEKS    = 16  # Indikator-Warmup: 16×7=112 Daily-Kerzen > 100-Kerzen-Threshold
@@ -557,19 +558,19 @@ def main():
     parser.add_argument('--min-trades',  type=int,   default=5,
                         help='Min. Trades pro Config im IS-Fenster [Standard: 5]')
     parser.add_argument('--no-telegram', action='store_true')
-    parser.add_argument('--all-configs', action='store_true',
-                        help='Alle Configs statt nur der aktiven Strategien aus settings.json')
+    parser.add_argument('--active-only', action='store_true',
+                        help='Nur die aktiven Strategien aus settings.json statt aller Configs')
     args = parser.parse_args()
 
-    configs = load_all_configs() if args.all_configs else load_configs()
+    configs = load_active_configs() if args.active_only else load_configs()
     if not configs:
-        if args.all_configs:
-            print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
-        else:
+        if args.active_only:
             print("Keine aktiven Strategien (mit Config) in settings.json. Zuerst "
-                  "auto_optimizer_scheduler.py --force ausführen oder --all-configs nutzen.")
+                  "auto_optimizer_scheduler.py --force ausführen oder ohne --active-only starten.")
+        else:
+            print("Keine Configs gefunden. Zuerst run_pipeline.sh ausführen.")
         return
-    print(f"  Strategien-Pool ({'alle Configs' if args.all_configs else 'aktiv in settings.json'}): "
+    print(f"  Strategien-Pool ({'aktiv in settings.json' if args.active_only else 'alle Configs'}): "
           f"{', '.join(c[1]['market']['symbol'].split('/')[0] + ' ' + c[1]['market']['timeframe'] for c in configs)}")
 
     # ── Dark Period: aus Config-Metadata oder manuell
