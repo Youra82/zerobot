@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "WLD/USDT:USDT",
+        "timeframe": "2h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0087,
+        "k_entropy": 1.47,
+        "h_window": 13,
+        "trend_min_bricks": 2
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 1.55,
+        "leverage": 13
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 128.45,
+        "optimized_at": "2026-10-01T07:53:45",
+        "train_start": "2024-03-31",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": 38.33
+    }
+}

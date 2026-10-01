@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "ICP/USDT:USDT",
+        "timeframe": "1h",
+        "htf": "4h"
+    },
+    "strategy": {
+        "base_pct": 0.0087,
+        "k_entropy": 1.32,
+        "h_window": 17,
+        "trend_min_bricks": 4
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 0.61,
+        "leverage": 15
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 4.87,
+        "optimized_at": "2026-10-01T07:46:39",
+        "train_start": "2023-04-01",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": -8.09
+    }
+}

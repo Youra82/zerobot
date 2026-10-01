@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "ONE/USDT:USDT",
+        "timeframe": "1h",
+        "htf": "4h"
+    },
+    "strategy": {
+        "base_pct": 0.0044,
+        "k_entropy": 1.395,
+        "h_window": 17,
+        "trend_min_bricks": 3
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 0.57,
+        "leverage": 18
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 17.44,
+        "optimized_at": "2026-10-01T07:51:59",
+        "train_start": "2023-04-01",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": -53.34
+    }
+}

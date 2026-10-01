@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "HBAR/USDT:USDT",
+        "timeframe": "6h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0098,
+        "k_entropy": 1.472,
+        "h_window": 13,
+        "trend_min_bricks": 2
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 0.57,
+        "leverage": 18
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": 25.1,
+        "optimized_at": "2026-10-01T07:53:45",
+        "train_start": "2023-04-01",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": 1.03
+    }
+}

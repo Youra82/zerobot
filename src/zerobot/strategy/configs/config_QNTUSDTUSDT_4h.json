@@ -1,0 +1,32 @@
+{
+    "market": {
+        "symbol": "QNT/USDT:USDT",
+        "timeframe": "4h",
+        "htf": "1d"
+    },
+    "strategy": {
+        "base_pct": 0.0099,
+        "k_entropy": 0.946,
+        "h_window": 14,
+        "trend_min_bricks": 3
+    },
+    "risk": {
+        "margin_mode": "isolated",
+        "risk_per_trade_pct": 0.51,
+        "leverage": 15
+    },
+    "behavior": {
+        "use_longs": true,
+        "use_shorts": true
+    },
+    "_meta": {
+        "pnl_pct": -6.16,
+        "optimized_at": "2026-10-01T07:48:18",
+        "train_start": "2024-03-31",
+        "train_end": "2026-03-31",
+        "fill_model": "real",
+        "oos_start": "2026-04-01",
+        "oos_end": "2026-09-30",
+        "oos_pnl_pct": 10.13
+    }
+}
