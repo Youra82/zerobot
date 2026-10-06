@@ -12,6 +12,7 @@ import ta
 import math
 
 from zerobot.strategy.ear_engine import EAREngine
+from zerobot.strategy import regime_filter
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.timeframe_utils import determine_htf
@@ -748,6 +749,26 @@ def check_and_open_new_position(exchange, model, scaler, params, telegram_config
             return
         signal_side  = 'buy' if signal_side_str == 'long' else 'sell'
         signal_price = entry_price
+
+        # Trend-Ruhe-Regel -- dieselbe Funktion wie backtester.run_backtest
+        rf = regime_filter.get_settings()
+        if rf.get('enabled', True):
+            try:
+                # Bitget liefert je Abruf weniger Tageskerzen als fuer den SMA noetig (limit 200 inkl. laufendem
+                # Tag; fetch_ohlcv_since bricht bei 1d schon nach 90 ab) -> fetch_historical_ohlcv blaettert bis
+                # zum Enddatum. Sonst meldet die Regel 'unbekannt' und der Bot steigt nie ein.
+                now = pd.Timestamp.now(tz='UTC')
+                btc_d = exchange.fetch_historical_ohlcv(
+                    regime_filter.BTC_SYMBOL, '1d', (now - pd.Timedelta(days=rf['sma_days'] + 30)).strftime('%Y-%m-%d'),
+                    (now + pd.Timedelta(days=1)).strftime('%Y-%m-%d'))
+                above = regime_filter.btc_above_sma(btc_d, pd.Timestamp.now(tz='UTC'), rf['sma_days'])
+            except Exception as e:
+                logger.error(f"Trend-Ruhe-Regel: BTC-Tageskerzen nicht abrufbar ({e}) -- kein Einstieg.")
+                return
+            if not regime_filter.entry_allowed(signal_side_str, above):
+                logger.info(f"Trend-Ruhe-Regel: {signal_side_str.upper()}-Signal ignoriert "
+                            f"(BTC über SMA{rf['sma_days']}: {above}).")
+                return
 
         # Re-Entry-Schutz
         last_entry_key   = f"{symbol_timeframe}_last_entry_price"

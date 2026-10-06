@@ -15,6 +15,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from zerobot.utils.exchange import Exchange
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.strategy.ear_logic import get_ear_signal
+from zerobot.strategy import regime_filter
 from zerobot.utils.timeframe_utils import determine_htf
 
 secrets_cache = None
@@ -31,6 +32,20 @@ secrets_cache = None
 FUNDING_RATE_PCT_PER_8H = 0.01
 
 _strategy_overrides_cache = None
+_btc_daily_cache = None
+
+
+def get_btc_daily():
+    """BTC-Tageskerzen fuer die Trend-Ruhe-Regel (regime_filter), einmal pro Prozess geladen."""
+    global _btc_daily_cache
+    if _btc_daily_cache is None:
+        from datetime import date
+        d = load_data(regime_filter.BTC_SYMBOL, '1d', '2022-01-01', date.today().strftime('%Y-%m-%d'))
+        if d is None or d.empty:
+            raise RuntimeError("Trend-Ruhe-Regel: BTC-Tageskerzen nicht ladbar (Cache/API). Backtest abgebrochen, "
+                               "statt still ohne Regel zu rechnen. Abschalten: settings.json regime_filter.enabled=false")
+        _btc_daily_cache = d
+    return _btc_daily_cache
 
 
 def get_strategy_overrides():
@@ -391,6 +406,8 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     trades_list      = []
     params_for_logic = {"strategy": strategy_params, "risk": risk_params}
     coarse_duration  = processed_data.index[1] - processed_data.index[0] if len(processed_data.index) >= 2 else None
+    regime_on = regime_filter.get_settings().get('enabled', True) and coarse_duration is not None
+    btc_daily = get_btc_daily() if regime_on else None
 
     for i, (timestamp, current_candle) in enumerate(processed_data.iterrows()):
         if current_capital <= 0:
@@ -494,6 +511,14 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
         # ── Einstiegs-Logik ───────────────────────────────────────────────────
         if not position and current_capital > 0:
             side, price = get_ear_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
+
+            if side and regime_on:
+                # Trend-Ruhe-Regel -- dieselbe Funktion wie live (trade_manager); Entscheidung zum
+                # Einstiegszeitpunkt = Schluss der Signalkerze.
+                above = regime_filter.btc_above_sma(btc_daily, timestamp + coarse_duration,
+                                                    regime_filter.get_settings()['sma_days'])
+                if not regime_filter.entry_allowed(side, above):
+                    continue
 
             if side:
                 # Entry = letzter abgeschlossener Brick dieser Candle (nicht candle['close'],

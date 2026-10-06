@@ -19,6 +19,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from zerobot.analysis.backtester import load_data, run_backtest, FINE_TF_MAP, LazyFineData
 from zerobot.utils.timeframe_utils import determine_htf
+from zerobot.strategy import regime_filter
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -270,7 +271,8 @@ def main():
                 # ehrlich optimiertes Ergebnis nie erreicht -> sonst wuerde nie mehr ueberschrieben.
                 if (existing_meta.get('fill_model') == 'real'
                         and existing_meta.get('train_start') == actual_start
-                        and existing_meta.get('train_end') == args.end_date):
+                        and existing_meta.get('train_end') == args.end_date
+                        and existing_meta.get('regime_filter') == regime_filter.get_settings()):
                     existing_pnl = existing_meta.get('pnl_pct')
             except Exception:
                 pass
@@ -307,6 +309,8 @@ def main():
                 "train_start":    actual_start,
                 "train_end":      args.end_date,
                 "fill_model":     "real",
+                # Trend-Ruhe-Regel, mit der diese Config optimiert wurde (Vergleich nur bei gleicher Einstellung)
+                "regime_filter":  regime_filter.get_settings(),
             },
         }
         with open(config_output_path, 'w') as f:

@@ -312,7 +312,8 @@ Zentrale Steuerung über `settings.json`:
         "end_date": "auto",
         "constraints": { "max_drawdown_pct": 30 },
         "send_telegram_on_completion": true
-    }
+    },
+    "regime_filter": { "enabled": true, "sma_days": 200, "short_below": true }
 }
 ```
 
@@ -324,6 +325,11 @@ Zentrale Steuerung über `settings.json`:
 | `optimization_settings.schedule` | Wochentag (0=Mo, 6=So) + Uhrzeit |
 | `optimization_settings.start_capital` | Startkapital für den Optimizer |
 | `optimization_settings.constraints.max_drawdown_pct` | Maximaler erlaubter Drawdown |
+| `regime_filter.enabled` | **Trend-Regel** (Standard an, auch wenn der Block fehlt): Long-Einstiege nur, wenn der letzte abgeschlossene BTC-Tagesschluss über dem SMA liegt. Signale gegen die erlaubte Richtung werden ignoriert. Offene Positionen laufen normal zu Ende |
+| `regime_filter.sma_days` | Länge des BTC-Tagesdurchschnitts (Standard 200) |
+| `regime_filter.short_below` | Short-Einstiege erlauben, wenn BTC **unter** dem SMA schließt (Standard an = Long+Short beide gefiltert, „S4“). `false` = nur Long |
+
+Die Trend-Regel ist **eine** Funktion (`src/zerobot/strategy/regime_filter.py`), die der Live-Bot (`trade_manager.py`) und `backtester.run_backtest` gemeinsam nutzen. Dadurch rechnen `run_pipeline.sh`, `show_results.sh` (alle Modi), `run_analysis.sh` und der wöchentliche Portfolio-Optimizer automatisch mit derselben Regel. Configs speichern in `_meta.regime_filter`, mit welcher Einstellung sie optimiert wurden. Herleitung: 344 Live-Trades 07.07.–05.10.2026: ohne Regel −37,73 USDT, mit Regel Long+Short +10,90 USDT (Shorts von 177 auf 47 Trades, −50,98 → −1,76 USDT). Achtung: Configs mit anderer `regime_filter`-Einstellung im `_meta` werden vom Optimizer neu bewertet, nach einer Änderung also `run_pipeline.sh` neu laufen lassen.
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 

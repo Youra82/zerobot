@@ -52,5 +52,10 @@
             "max_drawdown_pct": 30
         },
         "send_telegram_on_completion": true
+    },
+    "regime_filter": {
+        "enabled": true,
+        "sma_days": 200,
+        "short_below": true
     }
 }
