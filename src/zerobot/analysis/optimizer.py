@@ -2,6 +2,7 @@
 # EAR-Strategie Parameter-Optimierung via Optuna
 import os
 import sys
+import hashlib
 import json
 import math
 import optuna
@@ -224,9 +225,12 @@ def main():
         DB_FILE      = os.path.join(PROJECT_ROOT, 'artifacts', 'db', 'optuna_studies_zerobot.db')
         os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         STORAGE_URL  = f"sqlite:///{DB_FILE}?timeout=60"
-        # Trainingsperiode im Studynamen → neue Periode = frische Study, kein Trial-Akkumulation
+        # Trainingsperiode + Trend-Regel im Studynamen → neue Periode oder andere Regel = frische Study.
+        # Ohne Regel-Tag wuerden Trials aus Laeufen mit anderer Regel weitergezaehlt und koennten als
+        # "bester" Trial gewinnen (Werte unter anderer Einstiegslogik gerechnet).
         period_tag   = f"{args.start_date[:7]}_{args.end_date[:7]}".replace('-', '')
-        study_name   = f"ear_{create_safe_filename(symbol, timeframe)}_{OPTIM_MODE}_{period_tag}"
+        regime_tag   = hashlib.sha1(json.dumps(regime_filter.get_settings(), sort_keys=True).encode()).hexdigest()[:8]
+        study_name   = f"ear_{create_safe_filename(symbol, timeframe)}_{OPTIM_MODE}_{period_tag}_rf{regime_tag}"
 
         study = optuna.create_study(
             storage=STORAGE_URL, study_name=study_name,
