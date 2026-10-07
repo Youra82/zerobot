@@ -4,38 +4,38 @@
         "use_auto_optimizer_results": false,
         "active_strategies": [
             {
-                "symbol": "TIA/USDT:USDT",
+                "symbol": "QNT/USDT:USDT",
+                "timeframe": "6h",
+                "active": true
+            },
+            {
+                "symbol": "NEAR/USDT:USDT",
+                "timeframe": "1h",
+                "active": true
+            },
+            {
+                "symbol": "LINK/USDT:USDT",
                 "timeframe": "2h",
-                "active": true
-            },
-            {
-                "symbol": "DOT/USDT:USDT",
-                "timeframe": "6h",
-                "active": true
-            },
-            {
-                "symbol": "FIL/USDT:USDT",
-                "timeframe": "6h",
                 "active": true
             },
             {
                 "symbol": "SEI/USDT:USDT",
-                "timeframe": "4h",
-                "active": true
-            },
-            {
-                "symbol": "QNT/USDT:USDT",
                 "timeframe": "2h",
                 "active": true
             },
             {
-                "symbol": "INJ/USDT:USDT",
-                "timeframe": "6h",
+                "symbol": "FIL/USDT:USDT",
+                "timeframe": "1h",
                 "active": true
             },
             {
-                "symbol": "WLD/USDT:USDT",
+                "symbol": "AAVE/USDT:USDT",
                 "timeframe": "2h",
+                "active": true
+            },
+            {
+                "symbol": "UNI/USDT:USDT",
+                "timeframe": "1h",
                 "active": true
             }
         ]
