@@ -4,10 +4,11 @@
 ![Strategy](https://img.shields.io/badge/strategy-EAR%20Renko-orange)
 ![Exchange](https://img.shields.io/badge/exchange-Bitget%20Futures-00D4AA)
 ![Optimizer](https://img.shields.io/badge/optimizer-Optuna-4B8BBE)
+![Trend-Regel](https://img.shields.io/badge/Trend--Regel-S6-2a78d6)
 ![Status](https://img.shields.io/badge/status-experimental-critical)
 
 Ein quantitativer Crypto-Trading-Bot auf Basis von **Entropy-Adaptive Renko (EAR)**.
-Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert und gegen einen echten Out-of-Sample Dark Period validiert. Eine eingebaute Wächter-Routine vergleicht laufend die live gehandelte Brick-Kette gegen eine frisch berechnete Referenz und korrigiert Abweichungen automatisch.
+Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert und gegen einen echten Out-of-Sample Dark Period validiert. Eine **Trend-Regel (S6)** lässt nur Einstiege in Richtung des Gesamtmarkts zu: Long nur, wenn BTC über seiner 200-Tage-Linie steht, Short nur, wenn BTC und der Coin selbst schwach sind. Eine eingebaute Wächter-Routine vergleicht laufend die live gehandelte Brick-Kette gegen eine frisch berechnete Referenz und korrigiert Abweichungen automatisch.
 
 > ⚠️ **Disclaimer:** Diese Software ist experimentell und dient ausschließlich Forschungszwecken.
 > Der Handel mit Kryptowährungen birgt erhebliche finanzielle Risiken. Nutzung auf eigene Gefahr.
@@ -19,6 +20,7 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 - [Auf einen Blick](#auf-einen-blick)
 - [Demo](#demo)
 - [Grundidee](#grundidee)
+- [Trend-Regel S6](#trend-regel-s6)
 - [Architektur](#architektur)
 - [Wie das System funktioniert](#wie-das-system-funktioniert)
 - [Konfiguration](#konfiguration)
@@ -38,13 +40,14 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 
 | | |
 |---|---|
-| **Strategie** | Entropy-Adaptive Renko (EAR) — Brick-Chain Trend-/Reversal-Signale |
+| **Strategie** | Entropy-Adaptive Renko (EAR) — Einstieg nach `trend_min_bricks` gleichgerichteten Bricks, Ausstieg beim ersten Gegenbrick |
+| **Trend-Regel S6** | Long nur bei BTC > SMA200, Short nur bei BTC < SMA50 **und** Coin < eigener SMA100 — eine Funktion für Live und Backtest, siehe [Trend-Regel S6](#trend-regel-s6) |
 | **Exchange** | Bitget Futures (USDT-M Perpetuals) via CCXT |
 | **Ausführung** | `master_runner.py` per Cronjob, alle 15 Minuten |
 | **Parametersuche** | Optuna (200+ Trials pro Symbol/Timeframe) |
-| **Validierung** | Out-of-Sample Dark Period + 24 statistische Analysen (`run_analysis.sh`) |
+| **Validierung** | Out-of-Sample Dark Period (`oos_tester.py`) + 25 Analysen (`run_analysis.sh`) |
 | **Live-Überwachung** | `check_brick_sync.py` — vergleicht Live-Brick-Kette gegen Referenz, korrigiert automatisch, meldet per Telegram |
-| **Portfolio-Auswahl** | wöchentlich automatisch, inline im Cronjob — wählt aus bestehenden Configs, sucht keine neuen EAR-Parameter (das macht nur `./run_pipeline.sh` manuell) |
+| **Portfolio-Auswahl** | wöchentlich automatisch, inline im Cronjob — wählt mit echtem Kontostand und 4 Wochen Rückblick aus bestehenden Configs (nur OOS-positive), sucht keine neuen EAR-Parameter (das macht nur `./run_pipeline.sh` manuell) |
 | **Aktive Coins/TFs** | dynamisch aus `settings.json → active_strategies` — siehe [Empfohlene Coins und Timeframes](#empfohlene-coins-und-timeframes) für aktuelle Kandidaten |
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
@@ -54,6 +57,8 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 ## Demo
 
 [![ZeroBot Demo — Video abspielen](assets/demo_thumbnail.png)](https://claude.ai/code/artifact/4b4e630e-8416-4eda-a5d7-65a87fad48a5)
+
+> Stand der Aufnahme: September 2026, **vor** der Trend-Regel S6. Ablauf, Brick-Logik und Überwachung sind unverändert; neu ist nur der Filter vor jedem Einstieg ([Trend-Regel S6](#trend-regel-s6)).
 
 **[▶ Video abspielen](https://claude.ai/code/artifact/4b4e630e-8416-4eda-a5d7-65a87fad48a5)** (2:14 min, 1080p, spielt direkt im Browser) — ein vollständig vertontes Erklärvideo (deutsche Azure-Neural-Sprachausgabe) durch Idee, Installation, Optimierung, Live-Trading-Zyklus, automatische Brick-Ketten-Überwachung und einen echten Beispiel-Trade. Programmatisch erzeugt (Python/PIL-Frames + Azure Neural TTS + ffmpeg), kein Screen-Recording. Datei liegt zusätzlich unter `assets/demo.mp4` zum direkten Download (GitHub selbst rendert Video-Dateien aus dem Repo nicht als eingebetteten Player, nur eigens über die Weboberfläche hochgeladene — daher der externe Player-Link).
 
@@ -72,38 +77,83 @@ Zusätzlich als interaktive, selbstständig abspielende Web-Seite: **[▶ ZeroBo
 
 ## Grundidee
 
-Klassische Candlestick-Charts rauschen durch Zeit-Noise. **Renko-Bricks filtern Zeit heraus** — ein neuer Brick entsteht erst wenn der Kurs sich um einen definierten Betrag bewegt. EAR erweitert dies: Die Brick-Größe passt sich automatisch der aktuellen Markt-Entropie (Shannon-Entropie der Renditen) an — in ruhigen Märkten kleinere Bricks, in volatilen Märkten größere.
+Klassische Candlestick-Charts rauschen durch Zeit-Noise. **Renko-Bricks filtern Zeit heraus** — ein neuer Brick entsteht erst, wenn der Kurs sich um einen definierten Betrag bewegt. EAR erweitert dies: Die Brick-Größe passt sich der **Unentschlossenheit** des Markts an. Schließen die Kerzen nahe an Hoch oder Tief (klare Richtung), sind die Bricks klein; schließen sie in der Mitte ihrer Spanne (Unentschlossenheit), werden die Bricks größer und filtern mehr Rauschen.
 
 ```
-Normale 4h-Kerze:  Kurs steigt 0.1% → Kerze gezeichnet  (viel Rauschen)
-EAR-Brick:         Brick erst wenn Kurs > close × base_pct × (1 + k_entropy × H_rolling)
-                   H_rolling = Shannon-Entropie der letzten h_window Renditen
+Entropie je Kerze:  pb = (Schluss − Tief) / (Hoch − Tief),  ps = 1 − pb
+                    H  = −pb·log2(pb) − ps·log2(ps)      0 = Schluss am Rand · 1 = Schluss in der Mitte
+H_rolling:          Mittel von H über die letzten h_window Kerzen
+Brick-Größe:        Schluss des letzten Bricks × base_pct × (1 + k_entropy × H_rolling)
+Richtungswechsel:   erst bei doppelter Brick-Größe gegen die Richtung
 ```
 
 ```mermaid
 flowchart LR
-    P["Kursrenditen"] --> H["Shannon-Entropie<br/>H_rolling (h_window)"]
+    P["OHLC-Kerzen<br/>(nur abgeschlossene)"] --> H["Entropie je Kerze<br/>→ H_rolling (h_window)"]
     P --> B["Renko-Brick-Engine"]
     H --> B
     B -->|"Brick-Größe = close × base_pct × (1 + k_entropy × H)"| S["Brick-Kette"]
-    S --> SIG["Trend-/Reversal-Signal"]
+    S --> SIG["Signal: trend_min_bricks<br/>gleichgerichtete Bricks"]
+    SIG --> RF{"Trend-Regel S6<br/>erlaubt diese Richtung?"}
+    RF -- Ja --> T["Trade"]
+    RF -- Nein --> X["Signal ignoriert"]
 ```
 
 Der Optimizer findet pro Symbol/Timeframe die besten Werte für:
 
 ```
-base_pct             — Basis-Brick-Größe als % des Kurses  (0.002–0.010)
-k_entropy            — Entropie-Gewichtung: wie stark passt sich die Brick-Größe an  (0.4–1.5)
-h_window              — Entropie-Glättungsfenster (Anzahl Renditen)  (5–20)
-trend_min_bricks      — Mindest-Bricks in Trendrichtung für Signal-Bestätigung  (2–6)
-trend_reversal_bricks — Bricks gegen Trend für Entry-Trigger  (1–3)
-
-atr_multiplier_sl    — SL-Abstand vom Entry in ATR-Vielfachen  (1.5–5.0)
-risk_reward_ratio    — nur fuer Kelly-Sizing/Walk-Forward-Analysen (1.5–5.0);
-                        der echte TP-Exit ist live wie im Backtest der erste
-                        Gegenbrick, kein fixer Preis -- siehe Phase 2
-leverage              — Hebel  (5–20×)
+base_pct            — Basis-Brick-Größe als Anteil des Kurses           (0.002–0.010)
+k_entropy           — Entropie-Gewichtung: wie stark sich die Brick-Größe anpasst  (0.4–1.5)
+h_window            — Entropie-Glättungsfenster (Anzahl Kerzen)          (5–20)
+trend_min_bricks    — gleichgerichtete Bricks in Folge für ein Signal    (2–6)
+risk_per_trade_pct  — Risiko pro Trade in % des Kontos (bis zum SL)      (0.5–3.0)
+leverage            — Hebel (Obergrenze für die Positionsgröße)           (5–20×)
 ```
+
+Fest (nicht optimiert, `settings.json → strategy_overrides`): `sl_bricks_back = 2` — der Stop-Loss liegt auf dem Schlusskurs des Bricks **zwei Bricks vor** dem Einstiegs-Brick. Take-Profit gibt es nicht als festen Preis: Ausstieg ist der erste Gegenbrick.
+
+<p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
+
+---
+
+## Trend-Regel S6
+
+EAR-Signale kommen in beide Richtungen. Live (07.07.–05.10.2026, 344 Trades) haben vor allem die Shorts in steigenden Märkten Geld gekostet: −50,98 USDT allein auf der Short-Seite. Die Trend-Regel lässt deshalb nach jedem Signal nur Einstiege in Richtung des Gesamtmarkts zu. Grundlage ist immer die **letzte abgeschlossene Tageskerze**, die laufende zählt nie.
+
+```mermaid
+flowchart TD
+    S["EAR-Signal (Kerzenschluss)"] --> D{"Richtung?"}
+    D -- Long --> L{"BTC-Tagesschluss<br/>über SMA200?"}
+    L -- Ja --> OK["Einstieg"]
+    L -- Nein --> NO["Signal ignoriert<br/>(Log: Trend-Regel …)"]
+    D -- Short --> S1{"BTC-Tagesschluss<br/>unter SMA50?"}
+    S1 -- Nein --> NO
+    S1 -- Ja --> S2{"Coin-Tagesschluss unter<br/>eigener SMA100?"}
+    S2 -- Ja --> OK
+    S2 -- Nein --> NO
+    DATA["Tageskerzen fehlen<br/>(API-Fehler, zu kurze Historie)"] -.-> NO
+```
+
+![Trend-Regel S6 auf BTC und SEI](assets/trend_regel_s6.png)
+
+Grün: Long erlaubt. Rot: Short erlaubt. Bräunlich: beides erlaubt (BTC noch über der 200-Tage-Linie, aber schon unter der 50-Tage-Linie, und der Coin schwach). Weiß: der Bot ruht. Offene Positionen laufen immer normal mit Stop-Loss und Gegenbrick zu Ende — die Regel entscheidet nur über **neue** Einstiege.
+
+**Warum genau diese Regel:** Acht Kombinationen wurden auf denselben Daten verglichen (Longs ohne/mit Filter × Shorts ohne Filter, gespiegelt bei BTC < SMA200, BTC-Abwärtsmelder, F1+F2 = S6, aus):
+
+| | Live 07.07.–05.10.2026 | davon Shorts |
+|---|---|---|
+| ohne Filter | −37,73 USDT (344 Trades) | −50,98 USDT (177 Trades) |
+| **S6** | **+13,00 USDT** | **+0,34 USDT (11 Trades)** |
+
+Backtest des aktiven Portfolios mit den S6-Configs (Parameter bis 03/2026 trainiert, Mai–Oktober also ungesehen):
+
+![Backtest aktives Portfolio: S6 gegen ohne Filter](assets/s6_backtest.png)
+
+S6 macht etwa ein Drittel der Trades, also auch ein Drittel der Gebühren, und die Rückgänge der einzelnen Strategien sind etwa halb so tief. Ehrlich dazu: Der Sprung Ende September stammt zum großen Teil aus einem einzigen Trade (QNT 6h, QNT stieg vom 24. bis 28.09. von 72 auf über 280 USDT). Außerdem wurde das Portfolio anhand der letzten 4 Wochen ausgewählt, die im gezeigten Zeitraum liegen — der Gesamtwert ist deshalb eher zu optimistisch, der **Vergleich** S6 gegen ohne Filter aber fair.
+
+**Eine Funktion für alles:** `src/zerobot/strategy/regime_filter.py` (`evaluate` / `entry_allowed`) wird vom Live-Bot (`trade_manager.py`) und von `backtester.run_backtest` aufgerufen. Damit rechnen `run_pipeline.sh`, `show_results.sh` (alle 4 Modi), `run_analysis.sh` (alle 25 Modi) und der wöchentliche Portfolio-Optimizer automatisch mit derselben Regel. Geprüft: Live- und Backtest-Daten treffen an 2892 von 2892 Zeitpunkten dieselbe Entscheidung; 569 Backtest-Trades verletzen die Regel kein einziges Mal.
+
+Einstellungen: [Konfiguration → `regime_filter`](#konfiguration). Die Grafiken entstehen aus echten Daten mit `PYTHONPATH=src python assets/make_readme_assets.py`.
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 
@@ -116,15 +166,19 @@ flowchart TD
     subgraph Orchestrierung
         MR["master_runner.py"]
         AOS["auto_optimizer_scheduler.py"]
+        RPO["run_portfolio_optimizer.py"]
         CBS["check_brick_sync.py"]
+        IBS["init_brick_states.py"]
     end
     subgraph Strategie
         EAR["ear_engine.py"]
         LOGIC["ear_logic.py"]
+        RF["regime_filter.py<br/>(Trend-Regel S6)"]
         CFG[("configs/*.json")]
     end
     subgraph Analyse
         OPT["optimizer.py"]
+        OOS["oos_tester.py"]
         BT["backtester.py"]
         PS["portfolio_simulator.py"]
         SR["show_results.py"]
@@ -136,11 +190,15 @@ flowchart TD
         GD["guardian.py"]
     end
     MR --> TM --> EX
-    MR --> AOS --> OPT
+    MR --> AOS --> RPO --> BT
+    AOS --> IBS --> EAR
     MR --> CBS --> EAR
     TM --> EAR --> LOGIC
     LOGIC --> CFG
+    TM --> RF
+    BT --> RF
     OPT --> BT --> PS
+    OPT --> OOS --> BT
     TM -.-> TG
     CBS -.-> TG
 ```
@@ -158,27 +216,32 @@ zerobot/
 ├── check_brick_sync.py            # Live-Brick-Ketten gegen Referenz prüfen/korrigieren (läuft inline im Cronjob)
 ├── auto_optimizer_scheduler.py    # Automatischer Wochentimer: Neu-Optimierung
 ├── run_portfolio_optimizer.py     # Automatische Portfolio-Optimierung
+├── init_brick_states.py           # Brick-Ketten vorwärmen / bei geänderten Config-Parametern neu aufbauen
 ├── screen_volatility.py           # Vor-Screening aller Bitget-Perpetuals vor der vollen Pipeline
 ├── install.sh                     # Erstinstallation auf VPS
-├── update.sh                      # Git-Update (sichert secret.json)
+├── update.sh                      # Git-Update (sichert secret.json UND settings.json)
+├── push_configs.sh                # Configs + settings.json committen & pushen
 ├── run_tests.sh                   # Pytest-Sicherheitscheck
 ├── settings.json                  # Konfiguration (in Git)
 ├── secret.json                    # API-Keys (NICHT in Git)
+├── assets/                        # README-Grafiken + make_readme_assets.py (erzeugt sie aus echten Daten)
 │
 └── src/zerobot/
     ├── strategy/
     │   ├── ear_engine.py          # EAR-Brick-Berechnung (Entropie-adaptiv) aus OHLCV
     │   ├── ear_logic.py           # Signal-Erkennung auf EAR-Brick-Sequenzen
+    │   ├── regime_filter.py       # Trend-Regel S6 — eine Funktion für Live UND Backtest
     │   ├── run.py                 # Entry Point für eine Strategie
     │   └── configs/               # Optimierte Configs pro Symbol/TF (in Git)
     │
     ├── analysis/
-    │   ├── optimizer.py               # Optuna Parameter-Suche (EAR-Parameter)
-    │   ├── backtester.py              # Historische Simulation (trade_start_date für Dark Period)
+    │   ├── optimizer.py               # Optuna Parameter-Suche (EAR-Parameter, Studie je Trend-Regel)
+    │   ├── backtester.py              # Historische Simulation, echte Fills, Trend-Regel (trade_start_date = Dark Period)
     │   ├── oos_tester.py              # Pipeline OOS-Test: schreibt oos_start in Config _meta
     │   ├── portfolio_simulator.py     # Portfolio-Simulation (gemeinsamer Kapital-Pool)
     │   ├── portfolio_optimizer.py     # Beste Strategie-Kombination finden
     │   ├── show_results.py            # Tabellen-Output (Einzel + Portfolio)
+    │   ├── interactive_chart.py       # Plotly-Chart: Bricks, Trades, Equity (show_results Modus 4)
     │   │
     │   ├── walk_forward.py            # Rolling Walk-Forward Lookback-Analyse (Dark Period)
     │   ├── fee_impact.py              # Gebühren-Sweep → Break-Even Fee
@@ -196,11 +259,12 @@ zerobot/
     │   ├── vol_filter.py              # min_vol_ratio Sweep
     │   ├── time_analysis.py           # WR per Session (Asia / Europe / US)
     │   ├── regime_adaptive.py         # TREND_RR × RANGE_RR Gitter
-    │   └── drawdown_duration.py       # DD-Perioden, Erholungsdauer-Statistik
+    │   ├── drawdown_duration.py       # DD-Perioden, Erholungsdauer-Statistik
+    │   └── reopt_smoothing.py         # Glättung der wöchentlichen Portfolio-Bewertung (Analyse 25)
     │
     └── utils/
         ├── exchange.py            # Bitget CCXT Wrapper
-        ├── trade_manager.py       # Entry/TP/SL + Trailing Stop
+        ├── trade_manager.py       # Brick-Kette fortführen, Signal, Trend-Regel, Market-Entry, SL-Trigger, Gegenbrick-Exit
         ├── strategy_list.py       # Geteilte Helper: Symbol/TF-Parsing, verwaiste Positionen
         ├── telegram.py            # Telegram-Benachrichtigungen
         ├── guardian.py            # Crash-Schutz Decorator
@@ -219,46 +283,57 @@ zerobot/
 
 ```mermaid
 flowchart TD
-    A["Historische OHLCV-Daten (Bitget via CCXT)"] --> B["Shannon-Entropie der Renditen<br/>→ EAR-Bricks konstruieren"]
-    B --> C["Optuna: 200+ Trials<br/>sucht beste EAR-Parameter-Kombination"]
-    C --> D["Constraints prüfen:<br/>MaxDD ≤ Limit · WinRate ≥ Minimum · Trades ≥ 15"]
-    D --> E{"Neues Ergebnis<br/>besser als bestehende Config?"}
+    A["Historische OHLCV-Daten (Bitget via CCXT)<br/>+ BTC- und Coin-Tageskerzen"] --> B["Entropie je Kerze<br/>→ EAR-Bricks konstruieren"]
+    B --> C["Optuna: 200+ Trials, eigene Studie je<br/>Trainingszeitraum UND Trend-Regel"]
+    C --> R["jeder Trial: Backtest mit echten Fills<br/>und Trend-Regel S6"]
+    R --> D["Constraints prüfen:<br/>MaxDD ≤ Limit · WinRate ≥ Minimum · PnL ≥ Minimum"]
+    D --> E{"Besser als bestehende Config<br/>mit GLEICHER Trend-Regel?"}
     E -- Nein --> F["Config bleibt unverändert"]
-    E -- Ja --> G["Optional: OOS-Test auf Dark Period<br/>(Daten nach Cutoff-Datum)"]
-    G --> H["config_SYMBOL_TF.json speichern<br/>_meta: train_start/end, oos_start/end, oos_pnl_pct"]
+    E -- "Ja (oder andere Regel)" --> H["config_SYMBOL_TF.json speichern<br/>_meta: train_start/end, regime_filter"]
+    H --> G["oos_tester.py: Dark Period<br/>(Daten nach train_end)"]
+    G --> I["_meta: oos_start/end, oos_pnl_pct"]
 ```
 
-> Der Optimizer vergleicht jede neue Config mit der bestehenden.
-> Nur wenn das neue Ergebnis besser ist, wird die Config überschrieben.
+> Der Optimizer vergleicht jede neue Config mit der bestehenden — aber nur, wenn beide mit derselben Trend-Regel gerechnet wurden (`_meta.regime_filter`). Nach einer Regeländerung wird also immer neu geschrieben, und Optuna beginnt eine frische Studie (der Regel-Hash steht im Studiennamen), statt Trials einer anderen Regel weiterzuzählen.
 
 ### Phase 2 — Live-Trading (`master_runner.py`)
 
 ```mermaid
 flowchart TD
-    A["Cronjob-Start (alle 15 Min)"] --> B["Aktuelle OHLCV-Kerzen laden"]
-    B --> C["EAR-Bricks berechnen<br/>(Entropie-adaptive Brick-Größe)"]
-    C --> D["Signal prüfen: trend_min_bricks Trend-Bricks<br/>+ trend_reversal_bricks Gegen-Bricks"]
-    D --> E["Entry: Trigger-Limit-Order<br/>(0.05% Delta vom letzten Brick-Close)"]
-    E --> F["SL = ATR × atr_multiplier_sl vom Entry-Preis"]
-    F --> G["Kein fixes TP -- Exit beim ersten Gegenbrick<br/>(Brick-Reversal-Check, jeden Zyklus neu geprüft)"]
+    A["Cronjob-Start (alle 15 Min)"] --> B["Nur ABGESCHLOSSENE Kerzen laden"]
+    B --> C["Persistierte Brick-Kette fortführen<br/>(gleicher Anker wie im Backtest)"]
+    C --> P{"Position offen?"}
+    P -- Ja --> X["Gegenbrick entstanden?<br/>→ Market-Close"]
+    P -- Nein --> D{"trend_min_bricks<br/>gleichgerichtete Bricks?"}
+    D -- Nein --> Z["nichts tun"]
+    D -- Ja --> RF{"Trend-Regel S6<br/>(BTC- + Coin-Tageskerzen)"}
+    RF -- nicht erlaubt --> Z
+    RF -- erlaubt --> S["Größe: risk_per_trade_pct vom Konto<br/>÷ SL-Abstand, gedeckelt durch Hebel"]
+    S --> E["Market-Order zum Kerzenschluss"]
+    E --> F["SL als Trigger-Order auf Bitget:<br/>Brick-Schluss sl_bricks_back (=2) zurück"]
+    F -- "SL-Order scheitert" --> K["Position sofort schließen<br/>+ Telegram-Warnung"]
 ```
+
+Live und Backtest rechnen mit demselben Ausführungsmodell (`fill_model='real'`): Einstieg zum Schluss der Signalkerze, Ausstieg zum Schluss der Kerze, in der der Gegenbrick entsteht (live erkennt ihn erst nach Kerzenschluss), Stop-Loss als echte Trigger-Order — bei einer Kurslücke über das SL-Level wird zum Eröffnungskurs gefüllt.
 
 #### Beispiel-Signal
 
+Echter Trade aus dem Backtest des aktiven Portfolios (typischer Gewinner, Median aller Gegenbrick-Gewinne):
+
 ```
 [ZeroBot EAR Signal]
-  Symbol:    SOL/USDT:USDT (4h)
-  Richtung:  LONG
-  EAR-Brick: close × 0.005 × (1 + 0.8 × H)  ≈ 0.72 USDT pro Brick
-  Entry:     ~149.38 USDT (Trigger-Limit)
-  SL:         146.50 USDT (ATR-basiert, unter der Konsolidierung vor dem Entry)
-  TP:         kein fixer Preis -- Exit beim ersten Gegenbrick
-  Hebel:      12×
+  Symbol:       UNI/USDT:USDT (1h)
+  Richtung:     LONG
+  Trend-Regel:  LONG erlaubt (BTC über SMA200: True)
+  Entry:        5.735 USDT (Market, Schluss der Signalkerze 01.09.2026 07:00 UTC)
+  SL:           5.433 USDT (Brick-Schluss 2 Bricks vor dem Einstieg, Trigger-Order)
+  TP:           kein fixer Preis -- Exit beim ersten Gegenbrick
+  Exit:         6.051 USDT (02.09.2026, erster roter Brick nach dem Hoch)
 ```
 
 ![Beispiel-Trade: EAR-Brick-Entry und Gegenbrick-Exit](assets/ear_trade_example.png)
 
-Der Chart zeigt exakt die Renderfunktion, die der Live-Bot auch für seine eigenen Telegram-Signale nutzt (`trade_manager._generate_brick_png`) — hier mit einer sauberen Beispielsequenz statt Live-Daten. Nach der Konsolidierung (rote Bricks) bestätigen drei aufeinanderfolgende Up-Bricks den Trendwechsel und lösen den Entry aus; der Trend läuft weiter, bis der erste Gegenbrick (rot, nach dem Hoch) den Exit auslöst — kein fixer Kurs, sondern ein Strukturereignis in der Brick-Kette selbst.
+Der Chart nutzt exakt die Renderfunktion, mit der der Live-Bot seine Telegram-Signale zeichnet (`trade_manager._generate_brick_png`), hier mit den echten Bricks dieses Trades. Nach dem Rücksetzer (rote Bricks) bestätigen die grünen Bricks in Folge den Trend und lösen den Einstieg aus; der Stop-Loss liegt zwei Bricks darunter. Der Trend läuft weiter, bis der erste Gegenbrick (rot, nach dem Hoch) den Ausstieg auslöst — kein fixer Kurs, sondern ein Strukturereignis in der Brick-Kette selbst.
 
 ### Phase 3 — Live-Überwachung (`check_brick_sync.py`)
 
@@ -294,20 +369,22 @@ Zentrale Steuerung über `settings.json`:
         "max_open_positions": 7,
         "use_auto_optimizer_results": false,
         "active_strategies": [
-            { "symbol": "BTC/USDT:USDT", "timeframe": "4h", "active": true },
-            { "symbol": "SOL/USDT:USDT", "timeframe": "6h", "active": true },
+            { "symbol": "QNT/USDT:USDT", "timeframe": "6h", "active": true },
+            { "symbol": "UNI/USDT:USDT", "timeframe": "1h", "active": true },
             { "symbol": "ETH/USDT:USDT", "timeframe": "4h", "active": false }
         ]
     },
+    "strategy_overrides": { "sl_bricks_back": 2 },
     "optimization_settings": {
         "enabled": true,
+        "backtest_lookback_weeks": 4,
         "schedule": {
             "day_of_week": 6,
             "hour": 15,
             "minute": 0,
             "interval": { "value": 7, "unit": "days" }
         },
-        "start_capital": 100,
+        "start_capital": 10,
         "start_date": "2024-01-01",
         "end_date": "auto",
         "constraints": { "max_drawdown_pct": 30 },
@@ -320,17 +397,21 @@ Zentrale Steuerung über `settings.json`:
 | Parameter | Erklärung |
 |---|---|
 | `max_open_positions` | Maximale gleichzeitig offene Positionen |
-| `active_strategies` | Welche Pairs live gehandelt werden (`active: true`) |
-| `optimization_settings.enabled` | Automatische wöchentliche Neu-Optimierung ein/aus |
+| `active_strategies` | Welche Pairs live gehandelt werden (`active: true`) — schreibt der wöchentliche Portfolio-Optimizer |
+| `strategy_overrides.sl_bricks_back` | Stop-Loss = Brick-Schluss so viele Bricks vor dem Einstieg (gilt live UND im Backtest) |
+| `optimization_settings.enabled` | Automatische wöchentliche Portfolio-Auswahl ein/aus |
+| `optimization_settings.backtest_lookback_weeks` | Wie viele Wochen die Portfolio-Auswahl zurückschaut (Analyse 1 ermittelt den besten Wert) |
 | `optimization_settings.schedule` | Wochentag (0=Mo, 6=So) + Uhrzeit |
-| `optimization_settings.start_capital` | Startkapital für den Optimizer |
+| `optimization_settings.start_capital` | Nur Rückfall: der Scheduler nimmt den echten Kontostand (mindestens 100 USDT, falls nicht abrufbar) |
 | `optimization_settings.constraints.max_drawdown_pct` | Maximaler erlaubter Drawdown |
-| `regime_filter.enabled` | **Trend-Regel** (Standard an, auch wenn der Block fehlt): Long-Einstiege nur, wenn der letzte abgeschlossene BTC-Tagesschluss über dem SMA liegt. Signale gegen die erlaubte Richtung werden ignoriert. Offene Positionen laufen normal zu Ende |
+| `regime_filter.enabled` | **Trend-Regel** (Standard an, auch wenn der Block fehlt): Long-Einstiege nur, wenn der letzte abgeschlossene BTC-Tagesschluss über dem SMA liegt; Shorts siehe `short_mode`. Nicht erlaubte Signale werden ignoriert, offene Positionen laufen normal zu Ende |
 | `regime_filter.sma_days` | Länge des BTC-Tagesdurchschnitts für Longs (Standard 200) |
 | `regime_filter.short_mode` | Short-Filter: `f1f2` (Standard, „S6“): Short nur, wenn BTC unter seinem `short_btc_sma`-Tage-Durchschnitt **und** der gehandelte Coin unter seinem eigenen `short_coin_sma`-Tage-Durchschnitt schließt. `below_sma` („S4“): Short, wenn BTC unter `sma_days` schließt. `off` („S7“): nur Long |
 | `regime_filter.short_btc_sma` / `short_coin_sma` | Längen für den Short-Filter `f1f2` (Standard 50 / 100) |
 
-Die Trend-Regel ist **eine** Funktion (`src/zerobot/strategy/regime_filter.py`), die der Live-Bot (`trade_manager.py`) und `backtester.run_backtest` gemeinsam nutzen. Dadurch rechnen `run_pipeline.sh`, `show_results.sh` (alle Modi), `run_analysis.sh` und der wöchentliche Portfolio-Optimizer automatisch mit derselben Regel. Configs speichern in `_meta.regime_filter`, mit welcher Einstellung sie optimiert wurden. Herleitung: 344 Live-Trades 07.07.–05.10.2026: ohne Regel −37,73 USDT, mit S6 +13,00 USDT (Shorts von 177 auf 11 Trades, −50,98 → +0,34 USDT). Der Backtest holt dafür Tageskerzen von BTC und vom gehandelten Coin (`backtester.get_daily`, Symbol aus `load_data`); fehlen sie, bricht er ab, statt still ohne Regel zu rechnen. Achtung: Configs mit anderer `regime_filter`-Einstellung im `_meta` werden vom Optimizer neu bewertet, nach einer Änderung also `run_pipeline.sh` neu laufen lassen.
+Die Trend-Regel ist **eine** Funktion (`src/zerobot/strategy/regime_filter.py`), die der Live-Bot (`trade_manager.py`) und `backtester.run_backtest` gemeinsam nutzen — Details und Herleitung im Abschnitt [Trend-Regel S6](#trend-regel-s6). Configs speichern in `_meta.regime_filter`, mit welcher Einstellung sie optimiert wurden. Der Backtest holt Tageskerzen von BTC und vom gehandelten Coin (`backtester.get_daily`, Symbol aus `load_data`); fehlen sie, bricht er ab, statt still ohne Regel zu rechnen. Live steigt der Bot in dem Fall nicht ein.
+
+> **Nach einer Änderung an `regime_filter`** passen die Configs nicht mehr zur Regel: `./run_pipeline.sh` neu laufen lassen. Der alte Schlüssel `short_below` (Variante S4, nur am 06.10.2026 im Repo) wird ignoriert.
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 
@@ -417,6 +498,9 @@ Ergebnis: `src/zerobot/strategy/configs/config_SYMBOL_TF.json` pro Pair.
 | **1) Einzel-Backtest** | Simuliert jede Config einzeln — zeigt Trades, WinRate, PnL, MaxDD, Hebel, SL ATR, RRR, Trailing, Renko ATR |
 | **2) Manuelle Portfolio-Simulation** | Eigene Pair-Auswahl, kombiniertes Kapital, Kompoundierung |
 | **3) Automatische Portfolio-Opt.** | Bot wählt das Portfolio mit maximalem PnL bei gegebenem MaxDD-Limit |
+| **4) Interaktive Charts** | Plotly-HTML je Strategie: EAR-Bricks, Einstiege/Ausstiege, Equity, Volumen, ATR |
+
+Alle Modi rechnen mit der Trend-Regel S6 (gleiche Funktion wie live).
 
 #### 4. Strategien live schalten
 
@@ -427,6 +511,10 @@ nano settings.json
 ```json
 { "symbol": "SOL/USDT:USDT", "timeframe": "6h", "active": true }
 ```
+
+Oder automatisch: `.venv/bin/python3 auto_optimizer_scheduler.py --force` (wählt das Portfolio und schreibt `active_strategies`).
+
+> **Wichtig auf dem VPS:** `update.sh` stellt nach jedem Update die lokale `settings.json` wieder her — eine im Repo geänderte Auswahl kommt dort also nicht automatisch an. Soll die Repo-Fassung übernommen werden, nach dem Update einmal: `git checkout origin/main -- settings.json`
 
 #### 5. Cronjob einrichten
 
@@ -454,7 +542,9 @@ crontab -e
 
 Analysiert ausschließlich die in `settings.json` unter `active_strategies` eingetragenen Strategien mit `"active": true`. Ergebnisse werden als Chart per Telegram verschickt (Telegram-Credentials aus `secret.json`). Mit `--no-telegram` deaktivierbar.
 
-Jede Analyse ist unten als aufklappbarer Abschnitt dokumentiert — Titel + Kurzbeschreibung sind sichtbar, Details öffnen sich per Klick.
+Jede Analyse ist unten als aufklappbarer Abschnitt dokumentiert — Titel + Kurzbeschreibung sind sichtbar, Details öffnen sich per Klick. Alle Modi laufen über `backtester.run_backtest` und damit mit der Trend-Regel S6.
+
+> Hinweis: Die Analysen 5–7, 12 und 18 variieren Größen (fester RRR, ATR-Stop, Trailing-Stop, regimeabhängiger RRR), die der Live-Bot **nicht** nutzt — live liegt der Stop-Loss strukturell auf einem Brick und der Ausstieg ist der erste Gegenbrick. Diese Analysen sind Forschungswerkzeuge für mögliche Alternativen, kein Abbild der Live-Logik.
 
 ### Priorität 1 — Fundament (Pflichtanalysen vor Live-Betrieb)
 
@@ -890,7 +980,7 @@ Der wöchentliche Auto-Optimizer (`run_portfolio_optimizer.py`) liest diesen Wer
 <details>
 <summary><strong>23) h_window-Sweep</strong> — Entropie-Glättungsfenster (5–20)</summary>
 
-**Was es ist:** `h_window` ist die Anzahl der Renditen über die die Shannon-Entropie berechnet wird. Klein = reaktiv (springt schnell), groß = geglättet (stabiler). Sweep findet den optimalen Wert.
+**Was es ist:** `h_window` ist die Anzahl der Kerzen, über die die Kerzen-Entropie gemittelt wird. Klein = reaktiv (springt schnell), groß = geglättet (stabiler). Sweep findet den optimalen Wert.
 
 </details>
 
@@ -900,6 +990,15 @@ Der wöchentliche Auto-Optimizer (`run_portfolio_optimizer.py`) liest diesen Wer
 **Was es ist:** Simuliert 1h, 2h, 4h, 6h, 1d mit der aktuellen EAR-Config (ohne Neuoptimierung) auf demselben Symbol. Zeigt welcher Timeframe für diesen Coin am besten passt.
 
 **Kennzahlen:** PnL%, Win-Rate, Max-DD, Trades pro Timeframe. Hinweis: Nicht OOS-validiert, Config ist auf den Original-TF optimiert.
+
+</details>
+
+<details>
+<summary><strong>25) Reoptimierungs-Snapshot-Glättung</strong> — die 4-Wochen-Bewertung an mehreren Tagen mitteln?</summary>
+
+**Was es ist:** Prüft per Walk-Forward ohne Lookahead, ob die wöchentliche Portfolio-Auswahl besser wird, wenn die 4-Wochen-Bewertung nicht nur am Stichtag, sondern an mehreren Tagen davor gemessen und gemittelt wird (`baseline` gegen `smoothed_1d_N` / `smoothed_2d_N`). Der Portfolio-Optimizer nutzt derzeit 7 Snapshots im Abstand von 2 Tagen.
+
+**Ergebnis:** Equity-Kurven und Calmar-Balken je Variante, optional per Telegram.
 
 </details>
 
@@ -928,8 +1027,10 @@ Der `auto_optimizer_scheduler.py` läuft non-blocking bei jedem `master_runner.p
 flowchart TD
     A["master_runner.py startet"] --> B{"auto_optimizer_scheduler.py:<br/>Ist Optimierung fällig?"}
     B -- Nein --> C["sofort beendet (kein Overhead)"]
-    B -- Ja --> D["run_portfolio_optimizer.py --auto-write<br/>waehlt bestes Portfolio AUS BESTEHENDEN Configs<br/>→ settings.json aktualisieren"]
-    D --> E["init_brick_states.py --all<br/>waermt State nur fuer NEU aktivierte Symbole vor<br/>(bestehende States bleiben unveraendert)"]
+    B -- Ja --> K["Kapital = echter Kontostand<br/>(Bitget, USDT gesamt)"]
+    K --> D["run_portfolio_optimizer.py --auto-write<br/>nur Configs mit positivem OOS · Backtest mit Trend-Regel S6<br/>Bewertung: letzte 4 Wochen, 7 Snapshots geglättet<br/>Greedy-Auswahl, MaxDD-Limit, keine Coin-Doppelungen"]
+    D --> W["settings.json → active_strategies"]
+    W --> E["init_brick_states.py --all<br/>fehlende States anlegen, States mit<br/>geänderten Config-Parametern neu aufbauen"]
     E --> F["Telegram: Start- + Ende-Benachrichtigung"]
 ```
 
@@ -953,11 +1054,12 @@ Manuell erzwingen:
 |---|---|
 | `tail -f logs/cron.log` | Live-Logs mitverfolgen |
 | `grep -i "ERROR" logs/cron.log` | Nach Fehlern suchen |
+| `grep -h "Trend-Regel" logs/zerobot_*.log \| tail -20` | Entscheidungen der Trend-Regel ansehen |
 | `cd ~/zerobot && .venv/bin/python3 master_runner.py` | Manueller Test-Lauf |
 | `.venv/bin/python3 check_brick_sync.py --dry-run` | Brick-Sync-Check ohne Korrektur/Telegram |
 | `./run_tests.sh` | Pytest-Sicherheitscheck vor Live-Betrieb |
 | `./push_configs.sh` | Configs + Settings committen & pushen |
-| `./update.sh` | Bot aktualisieren (sichert `secret.json`) |
+| `./update.sh` | Bot aktualisieren (sichert `secret.json` und `settings.json`) |
 | `.venv/bin/python3 show_live_charts.py` | Live-Brick-Charts per Telegram anfordern |
 | `.venv/bin/python3 auto_optimizer_scheduler.py --force` | Optimierung sofort erzwingen |
 
@@ -972,6 +1074,10 @@ grep -i "ERROR" logs/cron.log
 
 # Letzte 200 Zeilen
 tail -n 200 logs/cron.log
+
+# Trend-Regel: erlaubte / ignorierte Signale je Strategie
+grep -h "Trend-Regel" logs/zerobot_*.log | tail -20
+# z.B. "Trend-Regel: SHORT-Signal ignoriert (BTC über SMA50: True, Coin über SMA100: False)."
 ```
 
 ### Manueller Start (Test)
@@ -1010,7 +1116,14 @@ Zeigt alle gefundenen Configs (mit OOS-PnL und Hebel) sowie aktive Strategien an
 ./update.sh
 ```
 
-Sichert automatisch `secret.json` vor dem `git reset --hard`.
+Sichert `secret.json` **und** `settings.json` vor dem `git reset --hard` und stellt beide danach wieder her. Danach baut `init_brick_states.py --all` fehlende Brick-Ketten auf und solche, deren Config-Parameter sich geändert haben.
+
+Neue Configs (`src/zerobot/strategy/configs/`) kommen damit sofort an, eine im Repo geänderte `settings.json` aber nicht. Soll die Repo-Fassung gelten (z. B. eine lokal berechnete Portfolio-Auswahl):
+
+```bash
+./update.sh
+git checkout origin/main -- settings.json
+```
 
 ### Live Brick-Charts per Telegram anfordern
 
@@ -1154,10 +1267,12 @@ Diese Tabelle ersetzt eine frühere, rein manuell kuratierte Einschätzung: Stat
 ## Wichtige Regeln
 
 - `secret.json` ist **nicht in Git** — wird von `update.sh` gesichert
+- `settings.json` ist in Git, wird von `update.sh` aber **lokal beibehalten** (Repo-Fassung nur per `git checkout origin/main -- settings.json`)
 - `artifacts/db/` ist **nicht in Git** — Optuna-Datenbank bleibt nach Updates erhalten
 - `src/zerobot/strategy/configs/` ist **in Git** — Configs werden mit gepusht
 - Immer erst `./run_pipeline.sh` bevor Live-Trading aktiviert wird
-- Optimizer überschreibt eine Config nur wenn das neue Ergebnis besser ist
+- Optimizer überschreibt eine Config nur, wenn das neue Ergebnis besser ist **und** mit derselben Trend-Regel gerechnet wurde
+- Signal- und Filter-Logik gibt es nur **einmal**, gemeinsam für Live und Backtest (`ear_engine`, `regime_filter`) — nie eine eigene Variante im Live-Code
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
 
@@ -1173,8 +1288,10 @@ ta           # ATR-Berechnung für Renko-Bricks
 optuna       # Bayesian Parameter-Optimierung
 tqdm         # Fortschrittsbalken
 requests     # Telegram
-plotly       # Charts (optional, run_analysis.sh)
+pytest       # Tests (run_tests.sh)
+plotly       # Charts (optional, run_analysis.sh, show_results Modus 4)
 openpyxl     # Excel-Export (optional)
+matplotlib   # Brick-Charts für Telegram, README-Grafiken
 ```
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
