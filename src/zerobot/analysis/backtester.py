@@ -32,20 +32,23 @@ secrets_cache = None
 FUNDING_RATE_PCT_PER_8H = 0.01
 
 _strategy_overrides_cache = None
-_btc_daily_cache = None
+_daily_cache = {}
+
+
+def get_daily(symbol):
+    """Tageskerzen fuer die Trend-Regel (regime_filter), einmal pro Prozess und Symbol geladen."""
+    if symbol not in _daily_cache:
+        from datetime import date
+        d = load_data(symbol, '1d', '2022-01-01', date.today().strftime('%Y-%m-%d'))
+        if d is None or d.empty:
+            raise RuntimeError(f"Trend-Regel: Tageskerzen {symbol} nicht ladbar (Cache/API). Backtest abgebrochen, "
+                               "statt still ohne Regel zu rechnen. Abschalten: settings.json regime_filter.enabled=false")
+        _daily_cache[symbol] = d
+    return _daily_cache[symbol]
 
 
 def get_btc_daily():
-    """BTC-Tageskerzen fuer die Trend-Ruhe-Regel (regime_filter), einmal pro Prozess geladen."""
-    global _btc_daily_cache
-    if _btc_daily_cache is None:
-        from datetime import date
-        d = load_data(regime_filter.BTC_SYMBOL, '1d', '2022-01-01', date.today().strftime('%Y-%m-%d'))
-        if d is None or d.empty:
-            raise RuntimeError("Trend-Ruhe-Regel: BTC-Tageskerzen nicht ladbar (Cache/API). Backtest abgebrochen, "
-                               "statt still ohne Regel zu rechnen. Abschalten: settings.json regime_filter.enabled=false")
-        _btc_daily_cache = d
-    return _btc_daily_cache
+    return get_daily(regime_filter.BTC_SYMBOL)
 
 
 def get_strategy_overrides():
@@ -272,6 +275,14 @@ class Bias:
 
 
 def load_data(symbol, timeframe, start_date_str, end_date_str):
+    """OHLCV aus Cache/API. Das Symbol haengt an df.attrs['symbol'] -- run_backtest braucht es fuer die
+    Trend-Regel (Tageskerzen des Coins); attrs ueberleben .copy() und Slicing."""
+    df = _load_data_raw(symbol, timeframe, start_date_str, end_date_str)
+    df.attrs['symbol'] = symbol
+    return df
+
+
+def _load_data_raw(symbol, timeframe, start_date_str, end_date_str):
     global secrets_cache
     data_dir   = os.path.join(PROJECT_ROOT, 'data')
     cache_dir  = os.path.join(data_dir, 'cache')
@@ -343,7 +354,7 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
 def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose=False,
                  fee_pct_override=None, return_trades=False,
                  trade_start_date=None, fine_data=None, funding_rate_override=None,
-                 fill_model='real'):
+                 fill_model='real', symbol=None):
     """fill_model='real' (Default, = Live-Ausfuehrung in trade_manager.py): Entry per
     Market-Order zum Close der Signalkerze, Brick-TP per Market-Order zum Close der Kerze,
     in der der Gegenbrick entsteht (Live erkennt ihn erst nach Kerzenschluss), SL als echte
@@ -408,6 +419,14 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     coarse_duration  = processed_data.index[1] - processed_data.index[0] if len(processed_data.index) >= 2 else None
     regime_on = regime_filter.get_settings().get('enabled', True) and coarse_duration is not None
     btc_daily = get_btc_daily() if regime_on else None
+    coin_daily = None
+    if regime_on and regime_filter.needs_coin_daily():
+        # Symbol fuer F2 (Coin unter eigener SMA): explizit > load_data-attrs > fine_data -- sonst hart abbrechen
+        symbol = symbol or data.attrs.get('symbol') or getattr(fine_data, 'symbol', None)
+        if not symbol:
+            raise RuntimeError("Trend-Regel: run_backtest kennt das Symbol nicht (symbol=... uebergeben oder Daten "
+                               "per load_data laden) -- ohne Coin-Tageskerzen kein Short-Filter.")
+        coin_daily = get_daily(symbol)
 
     for i, (timestamp, current_candle) in enumerate(processed_data.iterrows()):
         if current_capital <= 0:
@@ -513,11 +532,9 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
             side, price = get_ear_signal(processed_data, current_candle, params_for_logic, Bias.NEUTRAL)
 
             if side and regime_on:
-                # Trend-Ruhe-Regel -- dieselbe Funktion wie live (trade_manager); Entscheidung zum
+                # Trend-Regel -- dieselbe Funktion wie live (trade_manager); Entscheidung zum
                 # Einstiegszeitpunkt = Schluss der Signalkerze.
-                above = regime_filter.btc_above_sma(btc_daily, timestamp + coarse_duration,
-                                                    regime_filter.get_settings()['sma_days'])
-                if not regime_filter.entry_allowed(side, above):
+                if not regime_filter.entry_allowed(side, timestamp + coarse_duration, btc_daily, coin_daily):
                     continue
 
             if side:

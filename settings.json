@@ -66,6 +66,8 @@
     "regime_filter": {
         "enabled": true,
         "sma_days": 200,
-        "short_below": true
+        "short_mode": "f1f2",
+        "short_btc_sma": 50,
+        "short_coin_sma": 100
     }
 }

@@ -1,13 +1,17 @@
-"""Trend-Regel (S4): Long-Einstiege nur, wenn BTC ueber seiner 200-Tage-Linie schliesst,
-Short-Einstiege nur, wenn BTC darunter schliesst. Signale gegen die Richtung werden ignoriert (offene Positionen laufen normal mit Stop-Loss und Gegenbrick-Ausstieg zu Ende).
+"""Trend-Regel S6: Long-Einstiege nur, wenn BTC ueber seiner 200-Tage-Linie schliesst.
+Short-Einstiege nur, wenn BTC unter seiner 50-Tage-Linie UND der gehandelte Coin unter seiner eigenen
+100-Tage-Linie schliesst (F1+F2). Signale, die nicht erlaubt sind, werden ignoriert; offene Positionen
+laufen normal mit Stop-Loss und Gegenbrick-Ausstieg zu Ende.
 
 EINE Funktion fuer Live (trade_manager) und Backtest (backtester.run_backtest) -- damit erben Pipeline,
 show_results, Portfolio-Optimizer und run_analysis dieselbe Logik.
-Herleitung + Tests: botprojekte/forschung/2026-10-06-*/ und die Entscheidungsvorlage zerobot-trend-ruhe-regel.html.
+Herleitung + Tests: botprojekte/forschung/2026-10-06-*/ und zerobot-long-short-matrix.html / -seit-april.html.
 
-Konfiguration in settings.json (fehlt der Block, ist die Regel AN -- update.sh ueberschreibt die lokale
+Konfiguration in settings.json (fehlt der Block, gilt DEFAULTS -- update.sh ueberschreibt die lokale
 settings.json auf dem MiniPC nicht, der Standard muss deshalb im Code liegen):
-    "regime_filter": {"enabled": true, "sma_days": 200, "short_below": true}
+    "regime_filter": {"enabled": true, "sma_days": 200, "short_mode": "f1f2",
+                      "short_btc_sma": 50, "short_coin_sma": 100}
+short_mode: "f1f2" (S6) | "below_sma" (S4: Short bei BTC unter sma_days) | "off" (S7: nur Long)
 """
 import json
 import os
@@ -16,10 +20,10 @@ import pandas as pd
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 BTC_SYMBOL = 'BTC/USDT:USDT'
-# short_below: Shorts erlauben, wenn BTC UNTER der Linie schliesst (S4, User-Entscheidung 06.10.2026).
-# false = nur Long (S7). Vergleich: forschung/zerobot-long-short-matrix.html
-#   live 07-10/2026: S4 +10,90 USDT (Shorts 47 Tr. -1,76) | ohne Filter -37,73 (Shorts 177 Tr. -50,98)
-DEFAULTS = {'enabled': True, 'sma_days': 200, 'short_below': True}
+# S6 = User-Entscheidung 06.10.2026. Live 07.07.-05.10.2026: ohne Regel -37,73 USDT, S6 +13,00 USDT
+# (Shorts 177 -> 11 Trades, -50,98 -> +0,34 USDT).
+DEFAULTS = {'enabled': True, 'sma_days': 200, 'short_mode': 'f1f2', 'short_btc_sma': 50, 'short_coin_sma': 100}
+SHORT_MODES = ('f1f2', 'below_sma', 'off')
 _settings_cache = None
 
 
@@ -29,39 +33,71 @@ def get_settings():
         cfg = dict(DEFAULTS)
         try:
             with open(os.path.join(PROJECT_ROOT, 'settings.json')) as f:
-                cfg.update(json.load(f).get('regime_filter', {}) or {})
+                user = json.load(f).get('regime_filter', {}) or {}
         except Exception:
-            pass
+            user = {}
+        if 'short_mode' not in user and 'short_below' in user:      # alte Schreibweise (S4/S7)
+            user = {**user, 'short_mode': 'below_sma' if user['short_below'] else 'off'}
+        user.pop('short_below', None)
+        cfg.update(user)
+        if cfg['short_mode'] not in SHORT_MODES:
+            raise ValueError(f"settings.json regime_filter.short_mode='{cfg['short_mode']}' unbekannt, erlaubt: {SHORT_MODES}")
         _settings_cache = cfg
     return _settings_cache
 
 
-def btc_above_sma(btc_daily: pd.DataFrame, at: pd.Timestamp, sma_days: int) -> bool | None:
-    """True/False: Schluss der letzten bis `at` abgeschlossenen BTC-Tageskerze ueber dem SMA der letzten
+def needs_coin_daily():
+    """True, wenn die Regel die Tageskerzen des gehandelten Coins braucht (F2)."""
+    cfg = get_settings()
+    return bool(cfg.get('enabled', True)) and cfg['short_mode'] == 'f1f2'
+
+
+def history_days():
+    """So viele Kalendertage Tageskerzen muss der Live-Bot laden (laengster SMA + Puffer)."""
+    cfg = get_settings()
+    return max(cfg['sma_days'], cfg['short_btc_sma'], cfg['short_coin_sma']) + 30
+
+
+def above_sma(daily: pd.DataFrame, at: pd.Timestamp, sma_days: int) -> bool | None:
+    """True/False: Schluss der letzten bis `at` abgeschlossenen Tageskerze ueber dem SMA der letzten
     `sma_days` abgeschlossenen Tage. None, wenn zu wenig Historie.
     Abgeschlossen = Tagesbeginn + 1 Tag <= at  (die laufende Tageskerze zaehlt nie)."""
-    if btc_daily is None or btc_daily.empty:
+    if daily is None or daily.empty:
         return None
     at = pd.Timestamp(at)
     if at.tzinfo is None:
         at = at.tz_localize('UTC')
-    idx = btc_daily.index
+    idx = daily.index
     if idx.tz is None:
         idx = idx.tz_localize('UTC')
-    closes = btc_daily['close'].values[(idx + pd.Timedelta(days=1)) <= at]
+    closes = daily['close'].values[(idx + pd.Timedelta(days=1)) <= at]
     if len(closes) < sma_days:
         return None
     return bool(closes[-1] > closes[-sma_days:].mean())
 
 
-def entry_allowed(side: str, btc_above: bool | None) -> bool:
-    """side: 'long'/'buy' oder 'short'/'sell'. Bei abgeschalteter Regel immer True.
-    Fehlt die BTC-Historie (None), wird NICHT eingestiegen (lieber ruhen als ungeprueft handeln)."""
+btc_above_sma = above_sma   # alter Name
+
+
+def evaluate(side: str, at, btc_daily: pd.DataFrame, coin_daily: pd.DataFrame | None = None):
+    """(erlaubt, Begruendung). side: 'long'/'buy' oder 'short'/'sell'; at = Einstiegszeitpunkt
+    (Schluss der Signalkerze). Fehlt noetige Historie (None), wird NICHT eingestiegen."""
     cfg = get_settings()
     if not cfg.get('enabled', True):
-        return True
-    if btc_above is None:
-        return False
+        return True, 'Regel aus'
     if side in ('long', 'buy'):
-        return btc_above
-    return bool(cfg.get('short_below', True)) and not btc_above
+        a = above_sma(btc_daily, at, cfg['sma_days'])
+        return a is True, f"BTC über SMA{cfg['sma_days']}: {a}"
+    mode = cfg['short_mode']
+    if mode == 'off':
+        return False, 'Shorts aus'
+    if mode == 'below_sma':
+        a = above_sma(btc_daily, at, cfg['sma_days'])
+        return a is False, f"BTC über SMA{cfg['sma_days']}: {a}"
+    b = above_sma(btc_daily, at, cfg['short_btc_sma'])
+    c = above_sma(coin_daily, at, cfg['short_coin_sma'])
+    return (b is False and c is False), f"BTC über SMA{cfg['short_btc_sma']}: {b}, Coin über SMA{cfg['short_coin_sma']}: {c}"
+
+
+def entry_allowed(side: str, at, btc_daily: pd.DataFrame, coin_daily: pd.DataFrame | None = None) -> bool:
+    return evaluate(side, at, btc_daily, coin_daily)[0]
