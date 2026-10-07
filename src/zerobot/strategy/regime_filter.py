@@ -36,8 +36,8 @@ def get_settings():
                 user = json.load(f).get('regime_filter', {}) or {}
         except Exception:
             user = {}
-        if 'short_mode' not in user and 'short_below' in user:      # alte Schreibweise (S4/S7)
-            user = {**user, 'short_mode': 'below_sma' if user['short_below'] else 'off'}
+        # Alter Schluessel short_below (S4, nur 06.10.2026 im Repo, immer true) wird ignoriert: update.sh behaelt die
+        # settings.json auf dem MiniPC, ein Mapping wuerde dort S4 statt S6 aktivieren. Short-Filter nur ueber short_mode.
         user.pop('short_below', None)
         cfg.update(user)
         if cfg['short_mode'] not in SHORT_MODES:
