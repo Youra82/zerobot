@@ -1,27 +1,27 @@
 {
     "market": {
-        "symbol": "LDO/USDT:USDT",
-        "timeframe": "1h",
-        "htf": "4h"
+        "symbol": "CRV/USDT:USDT",
+        "timeframe": "2h",
+        "htf": "1d"
     },
     "strategy": {
-        "base_pct": 0.0073,
-        "k_entropy": 1.364,
-        "h_window": 12,
-        "trend_min_bricks": 5
+        "base_pct": 0.0089,
+        "k_entropy": 1.486,
+        "h_window": 11,
+        "trend_min_bricks": 6
     },
     "risk": {
         "margin_mode": "isolated",
-        "risk_per_trade_pct": 1.31,
-        "leverage": 7
+        "risk_per_trade_pct": 0.73,
+        "leverage": 6
     },
     "behavior": {
         "use_longs": true,
         "use_shorts": true
     },
     "_meta": {
-        "pnl_pct": 78.1,
-        "optimized_at": "2026-10-07T10:36:46",
+        "pnl_pct": -6.05,
+        "optimized_at": "2026-10-07T09:53:28",
         "train_start": "2023-04-01",
         "train_end": "2026-03-31",
         "fill_model": "real",
@@ -34,6 +34,6 @@
         },
         "oos_start": "2026-04-01",
         "oos_end": "2026-09-30",
-        "oos_pnl_pct": -3.8
+        "oos_pnl_pct": 4.76
     }
 }

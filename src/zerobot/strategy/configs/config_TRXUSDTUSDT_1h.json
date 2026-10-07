@@ -5,28 +5,35 @@
         "htf": "4h"
     },
     "strategy": {
-        "base_pct": 0.0088,
-        "k_entropy": 0.854,
-        "h_window": 17,
-        "trend_min_bricks": 4
+        "base_pct": 0.0066,
+        "k_entropy": 1.135,
+        "h_window": 10,
+        "trend_min_bricks": 2
     },
     "risk": {
         "margin_mode": "isolated",
-        "risk_per_trade_pct": 2.44,
-        "leverage": 12
+        "risk_per_trade_pct": 1.07,
+        "leverage": 13
     },
     "behavior": {
         "use_longs": true,
         "use_shorts": true
     },
     "_meta": {
-        "pnl_pct": 248.14,
-        "optimized_at": "2026-09-30T22:16:02",
+        "pnl_pct": 77.92,
+        "optimized_at": "2026-10-07T10:40:36",
         "train_start": "2023-04-01",
         "train_end": "2026-03-31",
         "fill_model": "real",
+        "regime_filter": {
+            "enabled": true,
+            "sma_days": 200,
+            "short_mode": "f1f2",
+            "short_btc_sma": 50,
+            "short_coin_sma": 100
+        },
         "oos_start": "2026-04-01",
         "oos_end": "2026-09-30",
-        "oos_pnl_pct": 2.61
+        "oos_pnl_pct": -2.3
     }
 }
