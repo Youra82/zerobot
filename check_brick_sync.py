@@ -48,12 +48,15 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from zerobot.strategy.ear_engine import EAREngine
 from zerobot.utils.exchange import Exchange
 from zerobot.utils.trade_manager import (brick_chain_params, backtest_warmup_start,
-                                         build_chain_like_backtest)
+                                         build_chain_like_backtest, closed_candles_only)
 from zerobot.utils.telegram import send_message, send_photo
 from zerobot.utils.strategy_list import add_orphaned_open_positions as _add_orphaned_open_positions
 
 DB_PATH        = os.path.join(PROJECT_ROOT, 'artifacts', 'db')
-OHLCV_CACHE    = os.path.join(DB_PATH, 'brick_sync_cache')
+# v2 (2026-10-14): der alte Cache speicherte die noch LAUFENDE Kerze mit ihrem Zwischenstand und lud sie
+# nie nach (Nachladen nur ab letztem Zeitstempel + 1 ms) -> Referenzkette auf falschen Schlusskursen, und die
+# "Korrektur" zog richtige Live-Ketten darauf. Neuer Ordner = alte, verdorbene Caches werden nicht mehr gelesen.
+OHLCV_CACHE    = os.path.join(DB_PATH, 'brick_sync_cache_v2')
 CONFIGS_DIR    = os.path.join(PROJECT_ROOT, 'src', 'zerobot', 'strategy', 'configs')
 RESULTS_FILE   = os.path.join(PROJECT_ROOT, 'artifacts', 'results', 'optimization_results.json')
 PENDING_PREFIX = os.path.join(DB_PATH, 'brick_sync_pending_')
@@ -129,7 +132,10 @@ def load_full_ohlcv(exchange, symbol, timeframe, train_start, logger):
 
     new_data = exchange.fetch_historical_ohlcv(
         symbol, timeframe, start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
-    if not new_data.empty:
+    # Nur abgeschlossene Kerzen speichern: eine laufende Kerze wuerde mit ihrem Zwischenstand im Cache
+    # bleiben (sie liegt beim naechsten Lauf vor start_dt und wird nie nachgeladen).
+    new_data = closed_candles_only(new_data, timeframe)
+    if new_data is not None and not new_data.empty:
         new_data = new_data[new_data.index >= start_dt]
         df = pd.concat([df, new_data]) if not df.empty else new_data
         df = df[~df.index.duplicated(keep='last')].sort_index()

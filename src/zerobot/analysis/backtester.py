@@ -301,6 +301,13 @@ def _load_data_raw(symbol, timeframe, start_date_str, end_date_str):
             data = pd.read_csv(cache_file, index_col='timestamp', parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 data.index = pd.to_datetime(data.index, utc=True)
+            # Aeltere Caches enthalten als letzte Zeile ggf. die beim Schreiben noch LAUFENDE Kerze
+            # (Zwischenstand statt Schlusskurs): verwerfen, wenn die Datei vor Kerzenschluss geschrieben wurde.
+            if len(data):
+                written = pd.Timestamp(os.path.getmtime(cache_file), unit='s', tz='UTC')
+                last = data.index[-1] if data.index[-1].tzinfo else data.index[-1].tz_localize('UTC')
+                if written < last + pd.Timedelta(timeframe):
+                    data = data.iloc[:-1]
             data_start    = data.index.min()
             data_end      = data.index.max()
             req_start     = pd.to_datetime(start_date_str, utc=True)
@@ -340,6 +347,8 @@ def _load_data_raw(symbol, timeframe, start_date_str, end_date_str):
         full_data = exchange.fetch_historical_ohlcv(
             symbol, timeframe, start_dt.strftime('%Y-%m-%d'), end_date_str)
 
+        # nur abgeschlossene Kerzen speichern und zurueckgeben (wie live, siehe closed_candles_only)
+        full_data = full_data[full_data.index + pd.Timedelta(timeframe) <= pd.Timestamp.now(tz='UTC')]             if not full_data.empty else full_data
         if not full_data.empty:
             full_data.to_csv(cache_file)
             req_start_dt = pd.to_datetime(start_date_str, utc=True)

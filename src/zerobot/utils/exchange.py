@@ -40,6 +40,16 @@ class Exchange:
             },
             'enableRateLimit': True,
         })
+        # ccxt < 4.5 (z.B. 4.3.5) waehlt fuer 1h-Kerzen aelter als 83 Tage den Bitget-Endpoint
+        # 'candles' statt 'history-candles' -- Bitget liefert dort LEER, fetch_historical_ohlcv
+        # brach still ab (1h-Historie endete 2,5 Monate zu frueh, Brick-Ketten live != Backtest).
+        # Beide Optionsnamen (alt: maxDaysPerTimeframe, ab 4.5: maxRecentDaysPerTimeframe) auf die
+        # Werte von ccxt 4.5.35 setzen -- gleicher Fix wie ltbbot (utils/exchange.py).
+        _recent_days = {'1m': 30, '3m': 30, '5m': 30, '15m': 30, '30m': 30, '1h': 60,
+                        '2h': 120, '4h': 240, '6h': 360, '12h': 720, '1d': 1440}
+        _ohlcv_opts = self.exchange.options.setdefault('fetchOHLCV', {})
+        _ohlcv_opts['maxDaysPerTimeframe'] = dict(_ohlcv_opts.get('maxDaysPerTimeframe', {}), **_recent_days)
+        _ohlcv_opts['maxRecentDaysPerTimeframe'] = dict(_ohlcv_opts.get('maxRecentDaysPerTimeframe', {}), **_recent_days)
         try:
             self.markets = self.exchange.load_markets()
             logger.info("Bitget Märkte erfolgreich geladen.")
@@ -178,6 +188,12 @@ class Exchange:
 
             if not all_ohlcv:
                 return pd.DataFrame()
+
+            tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
+            if all_ohlcv[-1][0] < min(end_ts, self.exchange.milliseconds()) - 3 * tf_ms:
+                logger.error(f"UNVOLLSTAENDIGE HISTORIE {symbol} ({timeframe}): Daten enden "
+                             f"{pd.to_datetime(all_ohlcv[-1][0], unit='ms', utc=True)}, angefragt bis {end_date_str}. "
+                             f"Brick-Ketten/Backtests auf diesen Daten sind nicht verlaesslich.")
 
             df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
