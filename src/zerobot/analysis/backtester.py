@@ -614,4 +614,6 @@ def run_backtest(data, strategy_params, risk_params, start_capital=1000, verbose
     }
     if return_trades:
         result['trades'] = trades_list
+        # fuer den Live-vs-Backtest-Abgleich laufender Positionen (aendert keine Rechnung)
+        result['open_position'] = dict(position) if position else None
     return result

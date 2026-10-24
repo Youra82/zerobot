@@ -14,3 +14,8 @@ daten/
 docs/
 .optimization_in_progress
 .last_optimization_run
+
+# Teamhistorie, Tagesbericht
+artifacts/db/team_history.jsonl
+artifacts/db/reports/
+artifacts/db/.last_live_vs_backtest_check

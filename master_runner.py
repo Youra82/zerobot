@@ -70,6 +70,7 @@ def main():
             print("Modus: Manuell. Lese Strategien aus settings.json...")
             strategy_list = live_settings.get('active_strategies', [])
 
+        _record_team(strategy_list)  # ohne verwaiste Positionen: die gehoeren nicht zum Team
         strategy_list = _add_orphaned_open_positions(list(strategy_list), SCRIPT_DIR)
 
         if not strategy_list:
@@ -84,6 +85,12 @@ def main():
             # hier schiefgeht -- Sync-Check ist eine Absicherung, keine
             # Voraussetzung fuer full_trade_cycle.
             print(f"[Brick-Sync] Fehler (Zyklus laeuft trotzdem weiter): {e}")
+
+        daily_check = os.path.join(SCRIPT_DIR, 'daily_live_vs_backtest_check.py')
+        if os.path.exists(daily_check):  # taeglicher Live-vs-Backtest-Abgleich (prueft selbst, ob faellig)
+            os.makedirs(os.path.join(SCRIPT_DIR, 'logs'), exist_ok=True)
+            with open(os.path.join(SCRIPT_DIR, 'logs', 'daily_live_vs_backtest_check.log'), 'a') as log_f:
+                subprocess.Popen([python_executable, daily_check], stdout=log_f, stderr=subprocess.STDOUT)
 
         print("=======================================================")
 
@@ -120,6 +127,23 @@ def main():
         print(f"Fehler: Datei nicht gefunden: {e}")
     except Exception as e:
         print(f"Unerwarteter Fehler: {e}")
+
+
+def _record_team(strategy_list):
+    """Teamhistorie: welches Portfolio ab wann live lief (fuer Live-vs-Backtest-Abgleich)."""
+    try:
+        sys.path.insert(0, os.path.join(SCRIPT_DIR, 'src'))
+        from zerobot.utils.team_history import record_team, strategy_key
+        keys = []
+        for s in strategy_list:
+            if isinstance(s, dict) and s.get('active', True) and s.get('symbol') and s.get('timeframe'):
+                keys.append(strategy_key(s['symbol'], s['timeframe']))
+            elif isinstance(s, str) and s.startswith('config_') and s.endswith('.json'):
+                keys.append(s[len('config_'):-len('.json')])
+        if record_team(keys, source='master_runner'):
+            print(f"Teamhistorie: neues Team aufgezeichnet ({len(keys)} Strategien).")
+    except Exception as e:
+        print(f"Warnung: Teamhistorie nicht geschrieben: {e}")
 
 
 if __name__ == "__main__":

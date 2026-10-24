@@ -162,6 +162,27 @@ def _build_strategies_data(config_files: list, fallback_start: str, end_date: st
     return strategies_data
 
 
+def _active_keys() -> list:
+    from zerobot.utils.team_history import strategy_key
+    try:
+        with open(SETTINGS_PATH) as f:
+            active = json.load(f).get('live_trading_settings', {}).get('active_strategies', [])
+        return sorted(strategy_key(s['symbol'], s['timeframe']) for s in active if s.get('active', True))
+    except Exception:
+        return []
+
+
+def _record_selection(team_before: list) -> None:
+    """Teamhistorie: Ergebnis der Wochenauswahl festhalten, auch wenn das Team gleich bleibt."""
+    try:
+        from zerobot.utils.team_history import record_team
+        after = _active_keys()
+        record_team(after, source='wochenauswahl: neu' if after != team_before else 'wochenauswahl: beibehalten',
+                    force=True)
+    except Exception as e:
+        print(f"  Warnung: Teamhistorie nicht geschrieben: {e}")
+
+
 def _write_to_settings(portfolio_files: list, strategies_data: dict) -> None:
     with open(SETTINGS_PATH) as f:
         settings = json.load(f)
@@ -577,7 +598,9 @@ def main() -> int:
     ]
 
     if args.auto_write:
+        team_before = _active_keys()
         _write_to_settings(portfolio_files, strategies_data)
+        _record_selection(team_before)
         print(f"{G}✓ settings.json aktualisiert — {len(portfolio_files)} Strategie(n).{NC}\n")
 
         if final:
