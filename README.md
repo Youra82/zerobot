@@ -8,7 +8,7 @@
 ![Status](https://img.shields.io/badge/status-experimental-critical)
 
 Ein quantitativer Crypto-Trading-Bot auf Basis von **Entropy-Adaptive Renko (EAR)**.
-Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert und gegen einen echten Out-of-Sample Dark Period validiert. Eine **Trend-Regel (S6)** lässt nur Einstiege in Richtung des Gesamtmarkts zu: Long nur, wenn BTC über seiner 200-Tage-Linie steht, Short nur, wenn BTC und der Coin selbst schwach sind. Eine eingebaute Wächter-Routine vergleicht laufend die live gehandelte Brick-Kette gegen eine frisch berechnete Referenz und korrigiert Abweichungen automatisch.
+Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch optimiert und gegen einen echten Out-of-Sample Dark Period validiert. Eine **Trend-Regel (S6)** lässt nur Einstiege in Richtung des Gesamtmarkts zu: **Long** nur, wenn BTC über seinem 200-Tage-Durchschnitt (SMA200) schließt; **Short** nur, wenn BTC unter seinem 50-Tage-Durchschnitt (SMA50) **und** der gehandelte Coin unter seinem eigenen 100-Tage-Durchschnitt (SMA100) schließt. Eine eingebaute Wächter-Routine vergleicht laufend die live gehandelte Brick-Kette gegen eine frisch berechnete Referenz und korrigiert Abweichungen automatisch.
 
 > ⚠️ **Disclaimer:** Diese Software ist experimentell und dient ausschließlich Forschungszwecken.
 > Der Handel mit Kryptowährungen birgt erhebliche finanzielle Risiken. Nutzung auf eigene Gefahr.
@@ -119,6 +119,17 @@ Fest (nicht optimiert, `settings.json → strategy_overrides`): `sl_bricks_back 
 ## Trend-Regel S6
 
 EAR-Signale kommen in beide Richtungen. Live (07.07.–05.10.2026, 344 Trades) haben vor allem die Shorts in steigenden Märkten Geld gekostet: −50,98 USDT allein auf der Short-Seite. Die Trend-Regel lässt deshalb nach jedem Signal nur Einstiege in Richtung des Gesamtmarkts zu. Grundlage ist immer die **letzte abgeschlossene Tageskerze**, die laufende zählt nie.
+
+Die Regel nutzt **drei** Durchschnittslinien (Tagesschlusskurse):
+
+| Regel | Bedingung | So sieht das aus (Tagesschlusskurse seit 07/2025) |
+|---|---|---|
+| **Long** | BTC schließt **über** seiner **SMA200** | <img src="assets/regel_long_btc_sma200.png" width="440" alt="BTC mit SMA200, grün = Long erlaubt"> |
+| **Short**, Bedingung 1 | BTC schließt **unter** seiner **SMA50** | <img src="assets/regel_short_btc_sma50.png" width="440" alt="BTC mit SMA50, rot = Bedingung 1 erfüllt"> |
+| **Short**, Bedingung 2 | der gehandelte Coin schließt **unter** seiner **eigenen SMA100** (Beispiel SEI) | <img src="assets/regel_short_coin_sma100.png" width="440" alt="SEI mit SMA100, rot = Bedingung 2 erfüllt"> |
+| **Ergebnis** für SEI | Long, wenn Zeile 1 grün · Short, wenn Zeile 2 **und** 3 rot · sonst ruht der Bot | <img src="assets/regel_ergebnis.png" width="440" alt="Ergebnis-Streifen: nur Long, nur Short, beides, ruht"> |
+
+Für einen Short müssen **beide** Short-Bedingungen gleichzeitig erfüllt sein; die SMA200 spielt für Shorts keine Rolle. Long und Short können sich überschneiden (BTC unter SMA50, aber noch über SMA200, und der Coin schwach). Die Längen stehen in `settings.json → regime_filter` (`sma_days`, `short_btc_sma`, `short_coin_sma`).
 
 ```mermaid
 flowchart TD

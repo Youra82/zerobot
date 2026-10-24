@@ -4,6 +4,7 @@
 
 assets/trend_regel_s6.png    BTC mit SMA200/SMA50 + Beispiel-Coin mit SMA100, Long-/Short-Erlaubnis der Trend-Regel S6
 assets/s6_backtest.png       aktive Strategien (settings.json) ab --start: Kontoverlauf mit S6 vs. ohne Filter
+assets/regel_*.png           je Bedingung der Trend-Regel ein Bild + Ergebnis-Streifen (--only-rules: nur diese)
 assets/ear_trade_example.png bester S6-Trade dieses Backtests, gezeichnet mit trade_manager._generate_brick_png
 """
 import argparse
@@ -88,6 +89,57 @@ def trend_rule_chart(coin_symbol, start='2025-01-01'):
     fig.savefig(os.path.join(OUT, 'trend_regel_s6.png'), dpi=110, bbox_inches='tight', facecolor='white'); plt.close(fig)
 
 
+def rule_panels(coin_symbol, start='2025-07-01'):
+    """Vier kleine Bilder fuer die Regel-Tabelle im README: je eine Bedingung + Ergebnis-Streifen."""
+    cfg = rf.get_settings()
+    btc = _closes(get_daily(rf.BTC_SYMBOL)); coin = _closes(get_daily(coin_symbol)).reindex(btc.index)
+    s200 = btc.rolling(cfg['sma_days']).mean(); s50 = btc.rolling(cfg['short_btc_sma']).mean()
+    c100 = coin.rolling(cfg['short_coin_sma']).mean()
+    long_ok, c1, c2 = btc > s200, btc < s50, coin < c100
+    sl = slice(pd.Timestamp(start), None)
+    name = coin_symbol.split('/')[0]
+
+    def panel(fname, price, sma, ok, color, label, sma_label):
+        fig, ax = plt.subplots(figsize=(6.4, 2.6))
+        for s, e in _spans(ok[sl]):
+            ax.axvspan(s, e, color=color, alpha=0.16, lw=0)
+        ax.plot(price[sl], color=INK, lw=1.3, label=label)
+        ax.plot(sma[sl], color=color, lw=1.8, ls='--', label=sma_label)
+        ax.grid(axis='y', color=GRID, lw=0.6); ax.set_axisbelow(True)
+        for sp in ('top', 'right'):
+            ax.spines[sp].set_visible(False)
+        ax.tick_params(labelsize=8)
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%m/%y'))
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13), ncol=2, frameon=False, fontsize=8)
+        fig.savefig(os.path.join(OUT, fname), dpi=100, bbox_inches='tight', facecolor='white'); plt.close(fig)
+
+    panel('regel_long_btc_sma200.png', btc, s200, long_ok, GREEN, 'BTC', f"SMA{cfg['sma_days']} · grün = darüber")
+    panel('regel_short_btc_sma50.png', btc, s50, c1, RED, 'BTC', f"SMA{cfg['short_btc_sma']} · rot = darunter")
+    panel('regel_short_coin_sma100.png', coin, c100, c2, RED, f'{name} (Beispiel-Coin)',
+          f"SMA{cfg['short_coin_sma']} von {name} · rot = darunter")
+
+    # Ergebnis-Streifen: pro Tag Long / Short / beides / ruht
+    short_ok = c1 & c2
+    state = pd.Series('ruht', index=btc.index)
+    state[long_ok & ~short_ok] = 'long'; state[short_ok & ~long_ok] = 'short'; state[long_ok & short_ok] = 'beides'
+    st = state[sl]
+    colors = {'long': GREEN, 'short': RED, 'beides': AMBER, 'ruht': '#d9dde3'}
+    fig, ax = plt.subplots(figsize=(6.4, 1.15))
+    for t, v in st.items():
+        ax.axvspan(t, t + pd.Timedelta(days=1), color=colors[v], lw=0)
+    ax.set_yticks([]); ax.set_xlim(st.index[0], st.index[-1] + pd.Timedelta(days=1))
+    for sp in ('top', 'right', 'left'):
+        ax.spines[sp].set_visible(False)
+    ax.tick_params(labelsize=8)
+    ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%m/%y'))
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(color=colors[k], label=l) for k, l in
+                       (('long', 'nur Long'), ('short', 'nur Short'), ('beides', 'beides'), ('ruht', 'ruht'))],
+              loc='upper center', bbox_to_anchor=(0.5, -0.32), ncol=4, frameon=False, fontsize=8)
+    fig.savefig(os.path.join(OUT, 'regel_ergebnis.png'), dpi=100, bbox_inches='tight', facecolor='white'); plt.close(fig)
+    return st.value_counts().to_dict()
+
+
 def portfolio_backtest(start, end, cap=100.0):
     settings = json.load(open(os.path.join(ROOT, 'settings.json'), encoding='utf-8'))
     act = [a for a in settings['live_trading_settings']['active_strategies'] if a.get('active', True)]
@@ -157,7 +209,11 @@ if __name__ == '__main__':
     ap.add_argument('--start', default='2026-05-01')
     ap.add_argument('--end', default=date.today().strftime('%Y-%m-%d'))
     ap.add_argument('--coin', default='SEI/USDT:USDT')
+    ap.add_argument('--only-rules', action='store_true', help='nur die Regel-Bilder (ohne Backtest)')
     a = ap.parse_args()
+    print('regel_*.png, Tage je Zustand:', rule_panels(a.coin))
+    if a.only_rules:
+        sys.exit(0)
     trend_rule_chart(a.coin); print('trend_regel_s6.png')
     trades, rows = portfolio_backtest(a.start, a.end); print('s6_backtest.png')
     for r in rows:
