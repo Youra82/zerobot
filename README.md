@@ -21,6 +21,7 @@ Keine willkürlichen Signale — alle Parameter werden via Optuna statistisch op
 - [Demo](#demo)
 - [Grundidee](#grundidee)
 - [Trend-Regel S6](#trend-regel-s6)
+- [Marktphasen](#marktphasen)
 - [Architektur](#architektur)
 - [Wie das System funktioniert](#wie-das-system-funktioniert)
 - [Konfiguration](#konfiguration)
@@ -167,6 +168,46 @@ S6 macht etwa ein Drittel der Trades, also auch ein Drittel der Gebühren, und d
 Einstellungen: [Konfiguration → `regime_filter`](#konfiguration). Die Grafiken entstehen aus echten Daten mit `PYTHONPATH=src python assets/make_readme_assets.py`.
 
 <p align="right"><a href="#inhaltsverzeichnis">⬆ Inhaltsverzeichnis</a></p>
+
+---
+
+## Marktphasen
+
+Backtest des aktuellen Teams aus `settings.json` (7 Strategien, gemeinsames Kapital wie live), 2214 Trades vom 01.01.2024 bis 26.10.2026. Jeder Tag ist der BTC-Marktphase am Vortag zugeordnet,
+gemessen an der BTC-Bewegung der letzten 30 Tage.
+
+![BTC-Tageskerzen mit Marktphasen und Bot-Ergebnis](assets/marktphasen_btc.png)
+
+**So liest man das Bild:**
+
+- **Kerzen:** BTC-Tageskerzen, ein Jahr pro Zeile. Blau = Tag im Plus, rot = Tag im Minus. Gestrichelt: SMA200.
+- **Hintergrund:** BTC-Marktphase, eingefärbt nach dem Ergebnis dieses Bots.
+  - **Hellblau = günstig:** BTC in 30 Tagen +3 bis +10 % oder über +10 %. Im Schnitt **+11,5 % pro 30 Tage**.
+  - **Beige = ungünstig:** alle übrigen Phasen. Im Schnitt **−2,5 % pro 30 Tage**.
+- **Farbstreifen unter jedem Jahr:** Rendite des Bots über die letzten 30 Tage (mit Zinseszins). Kräftiges Blau = gut verdient, Rot = Verlust.
+
+**Ergebnis nach BTC-Bewegung der letzten 30 Tage:**
+
+| BTC in 30 Tagen | Rendite pro 30 Tage | Trades | Ø Trade (vom Konto) | Trefferquote |
+|---|---|---|---|---|
+| unter −10 % (Crash oder starke Korrektur) | −3,6 % | 398 | −0,21 % | 26 % |
+| −10 bis −3 % | −5,2 % | 432 | +0,28 % | 40 % |
+| ±3 % (seitwärts) | +0,0 % | 445 | +0,05 % | 34 % |
+| +3 bis +10 % | +9,4 % | 345 | +0,28 % | 37 % |
+| über +10 % (Rally) | +13,3 % | 594 | +0,03 % | 30 % |
+
+**Was man sieht:**
+
+- Der Bot ist ein **Trendfolger für steigende Märkte**. Positiv ist er nur, wenn BTC steigt: +9 % pro 30 Tage bei +3 bis +10 %, +13 % bei über +10 %.
+- Bei fallendem BTC verliert er (−4 bis −5 % pro 30 Tage). Seitwärts kommt er bei ±0 heraus.
+- Die besten Zeiträume: November–Dezember 2024, Mai 2025, Juli 2025 sowie September–Oktober 2026 (+119 %).
+- Die schwächsten Zeiträume, mit −23 bis −28 %: April–Mai 2024, Juni–Juli 2024, Oktober 2025 und Juli 2026.
+- Aktuell (26.10.2026) liegt BTC in der Phase **−10 bis −3 %**. Für diesen Bot ist das eine ungünstige Phase. Im Backtest lagen die letzten 30 Tage bei +61,0 %.
+
+**Einschränkung:** Das ist ein Backtest. Die Configs wurden auf Teilen dieses Zeitraums optimiert, deshalb sind die
+absoluten Zahlen zu optimistisch. Aussagekräftig ist vor allem der Vergleich der Phasen untereinander. Die Phasen
+wurden im Nachhinein bestimmt. Ein Filter „nur in günstigen Phasen handeln“ müsste erst vorab festgelegt auf
+ungesehenen Daten bestehen, bevor er eingebaut wird.
 
 ---
 
